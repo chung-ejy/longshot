@@ -72,7 +72,7 @@ class Modeler(object):
             predictions = gs.predict(X_test)
             score = r2_score(predictions,y_test)
             model = gs.best_estimator_
-            return {"api":"xgb","model":model,"score":score}
+            return {"api":"light","model":model,"score":score}
         except Exception as e:
             print(str(e))
     
@@ -81,12 +81,12 @@ class Modeler(object):
         try:
             params = {"boosting_type":["Ordered","Plain"]}
             X_train, X_test, y_train, y_test = self.shuffle_split(data)
-            gs = GridSearchCV(CatBoostRegressor(objective="mape",verbosity = 0),param_grid=params,scoring="r2")
+            gs = GridSearchCV(CatBoostRegressor(),param_grid=params,scoring="r2")
             gs.fit(X_train,y_train)
             predictions = gs.predict(X_test)
             score = r2_score(predictions,y_test)
             model = gs.best_estimator_
-            return {"api":"xgb","model":model,"score":score}
+            return {"api":"cat","model":model,"score":score}
         except Exception as e:
             print(str(e))
     

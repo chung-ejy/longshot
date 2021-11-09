@@ -4,3 +4,5 @@ node_modules/
 *.env*
 *__pycache__*
 *.ipynb_checkpoints*
+catboost_info/
+*.csv
