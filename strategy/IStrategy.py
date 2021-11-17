@@ -7,7 +7,7 @@ class IStrategy(metaclass=ABCMeta):
     def __subclasshook_(cls,subclass):
         return (hasattr(subclass,"load") and callable(subclass.load) 
                 and hasattr(subclass,"transform") and callable(subclass.transform)
-                and hasattr(subclass,"store_model") and callable(subclass.store_model)
+                # and hasattr(subclass,"store_model") and callable(subclass.store_model)
                 and hasattr(subclass,"backtest") and callable(subclass.backtest))
                 and hasattr(subclass,"predict") and callable(subclass.predict))
     
@@ -16,17 +16,21 @@ class IStrategy(metaclass=ABCMeta):
         raise NotImplementedError("must define load")
     
     @abstractmethod
-    def transform(self):
-        raise NotImplementedError("must define transform")
+    def create_training_set(self):
+        raise NotImplementedError("must define create_training_set")
     
     @abstractmethod
-    def store_model(self):
-        raise NotImplementedError("must define store_model")
+    def create_prediction_set(self):
+        raise NotImplementedError("must define create_prediction_set")
     
     @abstractmethod
-    def backtest(self):
-        raise NotImplementedError("must define backtest")
+    def create_sim(self):
+        raise NotImplementedError("must define create_sim")
     
     @abstractmethod
-    def predict(self):
-        raise NotImplementedError("must define predict")
+    def create_record(self):
+        raise NotImplementedError("must define create_record")
+
+    @abstractmethod
+    def daily_recommendation(self):
+        raise NotImplementedError("must define daily_recommendation")
