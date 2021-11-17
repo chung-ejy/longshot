@@ -6,10 +6,12 @@ class IStrategy(metaclass=ABCMeta):
     @classmethod
     def __subclasshook_(cls,subclass):
         return (hasattr(subclass,"load") and callable(subclass.load) 
-                and hasattr(subclass,"transform") and callable(subclass.transform)
-                # and hasattr(subclass,"store_model") and callable(subclass.store_model)
-                and hasattr(subclass,"backtest") and callable(subclass.backtest))
-                and hasattr(subclass,"predict") and callable(subclass.predict))
+                and hasattr(subclass,"create_training_set") and callable(subclass.create_training_set)
+                and hasattr(subclass,"create_prediction_set") and callable(subclass.create_prediction_set)
+                and hasattr(subclass,"create_sim") and callable(subclass.create_sim)
+                and hasattr(subclass,"create_record") and callable(subclass.create_record)
+                and hasattr(subclass,"daily_recommendation") and callable(subclass.daily_recommendation)
+                )
     
     @abstractmethod
     def load(self):
