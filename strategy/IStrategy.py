@@ -5,12 +5,14 @@ from abc import ABCMeta, abstractmethod
 class IStrategy(metaclass=ABCMeta):
     @classmethod
     def __subclasshook_(cls,subclass):
-        return (hasattr(subclass,"load") and callable(subclass.load) 
+        return (
+                hasattr(subclass,"load") and callable(subclass.load) 
                 and hasattr(subclass,"subscribe") and callable(subclass.subscribe) 
                 and hasattr(subclass,"create_sim") and callable(subclass.create_sim)
                 and hasattr(subclass,"create_record") and callable(subclass.create_record)
                 and hasattr(subclass,"daily_recommendation") and callable(subclass.daily_recommendation)
-                )
+                and hasattr(subclass,"exit") and callable(subclass.exit)
+            )
     
     @abstractmethod
     def subscribe(self):
@@ -31,3 +33,7 @@ class IStrategy(metaclass=ABCMeta):
     @abstractmethod
     def daily_recommendation(self):
         raise NotImplementedError("must define daily_recommendation")
+    
+    @abstractmethod
+    def exit(self):
+        raise NotImplementedError("must define exit")

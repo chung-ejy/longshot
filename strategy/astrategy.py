@@ -13,7 +13,7 @@ class AStrategy(IStrategy):
         self.subscribed = False
         self.loaded = False
         self.db.connect()
-        self.simmed = db.retrieve("sim").index.size > 0 
+        self.simmed = self.db.retrieve("sim").index.size > 0 
         self.db.disconnect()
         super().__init__()
     
@@ -23,16 +23,19 @@ class AStrategy(IStrategy):
         self.subscribed = True
 
     def load(self):
-        if not self.subscribed:
-            self.subscribe()
+        if self.simmed:
+            self.loaded = True
         else:
-            for subscription in self.subscriptions:
-                db = self.subscriptions[subscription]["db"]
-                table = self.subscriptions[subscription]["table"]
-                db.connect()
-                self.subscriptions[subscription]["dataset"] = db.retrieve(table)
-                db.disconnect()
-        self.loaded = True
+            if not self.subscribed:
+                self.subscribe()
+            else:
+                for subscription in self.subscriptions:
+                    db = self.subscriptions[subscription]["db"]
+                    table = self.subscriptions[subscription]["table"]
+                    db.connect()
+                    self.subscriptions[subscription]["dataset"] = db.retrieve(table)
+                    db.disconnect()
+            self.loaded = True
     
     def create_record(self):
         return {
