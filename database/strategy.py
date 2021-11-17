@@ -2,8 +2,8 @@ from database.adatabase import ADatabase
 import pandas as pd
 class Strategy(ADatabase):
     
-    def __init__(self):
-        super().__init__("project_strategy")
+    def __init__(self,name):
+        super().__init__(name)
 
     
     def retrieve_hlt_data(self,ticker):

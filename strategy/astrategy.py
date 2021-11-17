@@ -2,21 +2,32 @@ from pymongo import MongoClient, DESCENDING
 import pandas as pd
 from strategy.istrategy import IStrategy
 from database.strategy import Strategy
+from database.dbfact import DBFact
 class AStrategy(IStrategy):
     def __init__(self,name,subscriptions,timeperiod):
         self.name = name
         self.subscriptions = subscriptions
         self.timeperiod = timeperiod
         self.db = Strategy(name)
+        self.subscribed = False
         super().__init__()
     
+    def subscribe(self):
+        for subscription in self.subscriptions:
+            self.subscriptions[subscription]["db"] = DBFact.subscribe(subscription)
+        self.subscribed = True
+
     def load(self):
-        for subscription in subscriptions:
-            self.subscription = DBFact.subscribe(subscription)
-    
-    def create_training_set(self):
-        return pd.DataFrame([{"test":test}])
-    
+        if not self.subscribed:
+            self.subscribe()
+        else:
+            for subscription in self.subscriptions:
+                db = self.subscriptions[subscription]["db"]
+                table = self.subscriptions[subscription]["table"]
+                db.connect()
+                self.subscriptions[subscription]["dataset"] = db.retrieve(table)
+                db.disconnect()
+        
     def create_training_set(self):
         return pd.DataFrame([{"test":test}])
     
