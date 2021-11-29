@@ -1,20 +1,18 @@
 from pymongo import MongoClient, DESCENDING
 import pandas as pd
-from strategy.istrategy import IStrategy
-from database.strategy import Strategy
+from product.iproduct import IProduct
+from database.product import Product
 from database.dbfact import DBFact
-class AStrategy(IStrategy):
-    def __init__(self,name,start_date,end_date,subscriptions,params):
+class AProduct(IProduct):
+    def __init__(self,name,subscriptions,params):
         self.name = name
-        self.start_date = start_date
-        self.end_date = end_date
         self.subscriptions = subscriptions
         self.params = params
-        self.db = Strategy(name)
+        self.db = Product(name)
         self.subscribed = False
         self.loaded = False
         self.db.connect()
-        self.simmed = self.db.retrieve_sim(self.params).index.size > 0 
+        self.simmed = self.db.retrieve_sim(params).index.size > 0 
         self.db.disconnect()
         super().__init__()
     
@@ -31,7 +29,7 @@ class AStrategy(IStrategy):
                 self.subscribe()
             else:
                 for subscription in self.subscriptions:
-                    if self.subscriptions[subscription]["preload"]
+                    if self.subscriptions[subscription]["preload"]:
                         db = self.subscriptions[subscription]["db"]
                         for table in self.subscriptions[subscription]["tables"]:
                             db.connect()
@@ -56,6 +54,3 @@ class AStrategy(IStrategy):
         else:
             sim = pd.DataFrame([{"test":test}])
         return sim
-               
-    def daily_recommendation(self):
-        return pd.DataFrame([{"test":test}])

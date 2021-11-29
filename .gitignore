@@ -6,3 +6,7 @@ node_modules/
 *.ipynb_checkpoints*
 catboost_info/
 *.csv
+stratbooks/
+productbooks/
+qa/
+visual/

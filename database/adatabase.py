@@ -27,7 +27,7 @@ class ADatabase(IDatabase):
         try:
             db = self.client[self.name]
             table = db[table_name]
-            data = table.find(show_record_id=False)
+            data = table.find({},{"_id":0},show_record_id=False)
             return pd.DataFrame(list(data))
         except Exception as e:
             print(self.name,table_name,str(e))
