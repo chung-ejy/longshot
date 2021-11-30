@@ -5,7 +5,8 @@ import pytz
 from tqdm import tqdm
 pd.options.mode.chained_assignment = None
 class ProgressReport(AStrategy):
-    def __init__(self,start_date,end_date,params):
+    def __init__(self,start_date,end_date,params={"timeframe":"quarterly"
+                    ,"requirement":5}):
         super().__init__(f"progress_report",
                             start_date,
                             end_date,
