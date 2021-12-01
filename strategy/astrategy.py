@@ -3,6 +3,7 @@ import pandas as pd
 from strategy.istrategy import IStrategy
 from database.strategy import Strategy
 from database.dbfact import DBFact
+from tqdm import tqdm
 class AStrategy(IStrategy):
     def __init__(self,name,start_date,end_date,subscriptions,params):
         self.name = name
@@ -30,8 +31,8 @@ class AStrategy(IStrategy):
             if not self.subscribed:
                 self.subscribe()
             else:
-                for subscription in self.subscriptions:
-                    if self.subscriptions[subscription]["preload"]
+                for subscription in tqdm(self.subscriptions):
+                    if self.subscriptions[subscription]["preload"]:
                         db = self.subscriptions[subscription]["db"]
                         for table in self.subscriptions[subscription]["tables"]:
                             db.connect()

@@ -13,8 +13,8 @@ import pandas as pd
 import xgboost as xgb
 from xgboost.sklearn import XGBClassifier
 from xgboost.training import train
-from catboost import CatBoostRegressor
-from lightgbm import LGBMRegressor
+# from catboost import CatBoostRegressor
+# from lightgbm import LGBMRegressor
 import warnings
 warnings.filterwarnings(action='ignore')
 
@@ -62,33 +62,33 @@ class Modeler(object):
         except Exception as e:
             print(str(e))
     
-    @classmethod
-    def light_regression(self,data):
-        try:
-            params = {"boosting_type":["gbdt","goss","dart","rf"]}
-            X_train, X_test, y_train, y_test = self.shuffle_split(data)
-            gs = GridSearchCV(LGBMRegressor(verbosity = 0),param_grid=params,scoring="r2")
-            gs.fit(X_train,y_train)
-            predictions = gs.predict(X_test)
-            score = r2_score(predictions,y_test)
-            model = gs.best_estimator_
-            return {"api":"light","model":model,"score":score}
-        except Exception as e:
-            print(str(e))
+    # @classmethod
+    # def light_regression(self,data):
+    #     try:
+    #         params = {"boosting_type":["gbdt","goss","dart","rf"]}
+    #         X_train, X_test, y_train, y_test = self.shuffle_split(data)
+    #         gs = GridSearchCV(LGBMRegressor(verbosity = 0),param_grid=params,scoring="r2")
+    #         gs.fit(X_train,y_train)
+    #         predictions = gs.predict(X_test)
+    #         score = r2_score(predictions,y_test)
+    #         model = gs.best_estimator_
+    #         return {"api":"light","model":model,"score":score}
+    #     except Exception as e:
+    #         print(str(e))
     
-    @classmethod
-    def cat_regression(self,data):
-        try:
-            params = {"boosting_type":["Ordered","Plain"]}
-            X_train, X_test, y_train, y_test = self.shuffle_split(data)
-            gs = GridSearchCV(CatBoostRegressor(),param_grid=params,scoring="r2")
-            gs.fit(X_train,y_train)
-            predictions = gs.predict(X_test)
-            score = r2_score(predictions,y_test)
-            model = gs.best_estimator_
-            return {"api":"cat","model":model,"score":score}
-        except Exception as e:
-            print(str(e))
+    # @classmethod
+    # def cat_regression(self,data):
+    #     try:
+    #         params = {"boosting_type":["Ordered","Plain"]}
+    #         X_train, X_test, y_train, y_test = self.shuffle_split(data)
+    #         gs = GridSearchCV(CatBoostRegressor(),param_grid=params,scoring="r2")
+    #         gs.fit(X_train,y_train)
+    #         predictions = gs.predict(X_test)
+    #         score = r2_score(predictions,y_test)
+    #         model = gs.best_estimator_
+    #         return {"api":"cat","model":model,"score":score}
+    #     except Exception as e:
+    #         print(str(e))
     
     @classmethod
     def xgb_classify(self,data,multioutput):
