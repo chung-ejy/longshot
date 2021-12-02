@@ -13,7 +13,7 @@ class Analyzer(object):
         if trades.index.size < 1:
             return pd.DataFrame([{"message":"no trades..."}])
         number_of_strats = len(portfolio.strats.keys())
-        for strategy in portfolio.strats.keys():
+        for strategy in list(portfolio.strats.keys()):
             strat_trades = trades[trades["strategy"]==strategy]
             cash = []
             for seat in range(portfolio.seats):
@@ -24,7 +24,7 @@ class Analyzer(object):
                     cash.append(initial)
             strat_trades["pv"] = cash
             stuff.append(strat_trades)
-        analysis = pd.concat(stuff).pivot_table(index=["strategy","date"],columns="seat",values="pv").fillna(method="ffill").dropna().reset_index()
+        analysis = pd.concat(stuff).pivot_table(index=["strategy","date"],columns="seat",values="pv").fillna(method="ffill").fillna(float(total_cash / number_of_strats / portfolio.seats )).reset_index()
         analysis["pv"] = [sum([row[1][i] for i in range(portfolio.seats)]) for row in analysis.iterrows()]
         final = analysis.pivot_table(index="date",columns="strategy",values="pv").fillna(method="ffill").reset_index()
         return final

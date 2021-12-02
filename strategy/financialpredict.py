@@ -6,11 +6,9 @@ from tqdm import tqdm
 pd.options.mode.chained_assignment = None
 class RollingPercent(AStrategy):
     def __init__(self,start_date,end_date,params=
-                        {"timeframe":"daily"
-                    ,"requirement":5
-                    ,"days":7
-                    ,"value":True
-                    ,"currency":"crypto"}):
+                        {"timeframe":"quarterly"
+                    ,"requirement":10
+                    ,"value":True}):
         super().__init__(f"rolling_percent",
                             start_date,
                             end_date,

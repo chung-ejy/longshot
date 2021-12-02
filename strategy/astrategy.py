@@ -56,6 +56,7 @@ class AStrategy(IStrategy):
             self.db.disconnect()
         else:
             sim = pd.DataFrame([{"test":test}])
+            self.simmed = True
         return sim
                
     def daily_recommendation(self):

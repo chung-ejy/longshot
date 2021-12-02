@@ -56,7 +56,7 @@ class EquityPortfolio(APortfolio):
         for strat in tqdm(self.strats.keys()):
             try:
                 self.db.connect()
-                query = self.strats[strat]["params"]
+                query = {**self.strats[strat]["params"]}
                 query["strategy"] = strat
                 t = self.db.retrieve_trades(query)
                 self.db.disconnect()
