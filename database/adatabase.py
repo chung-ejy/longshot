@@ -31,3 +31,11 @@ class ADatabase(IDatabase):
             return pd.DataFrame(list(data))
         except Exception as e:
             print(self.name,table_name,str(e))
+
+    def delete(self,table_name,query):
+        try:
+            db = self.client[self.name]
+            table = db[table_name]
+            data = table.delete_many(query)
+        except Exception as e:
+            print(self.name,table_name,str(e))

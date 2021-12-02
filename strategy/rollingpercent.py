@@ -32,10 +32,11 @@ class RollingPercent(AStrategy):
         return required
 
     def create_sim(self):
-        if self.simmed:
-            self.db.connect()
-            sim = self.db.retrieve_sim(self.params)
-            self.db.disconnect()
+        self.db.connect()
+        sim = self.db.retrieve_sim(self.params)
+        self.db.disconnect()
+        if sim.index.size > 1:
+            return sim
         else:
             start_year = self.start_date.year
             end_year = self.end_date.year

@@ -5,55 +5,73 @@ from datetime import timedelta
 import pytz
 from tqdm import tqdm
 pd.options.mode.chained_assignment = None
-from modeler.modeler import Modeler as m
 from datetime import datetime, timedelta, timezone
-import numpy as np
-import math
-import pickle
-from sklearn.preprocessing import OneHotEncoder
-from tqdm import tqdm
+from backtester.backtester import Backtester
 class EquityPortfolio(APortfolio):
-    def __init__(self,start,end,name,params={"strats":{"rolling_percent":{"params":{"timeframe":"daily"
-                ,"requirement":5
-                ,"days":7
-                ,"value":True
-                ,"currency":"prices"}},
-                            "progress_report":{"params":{"timeframe":"quarterly"
-                    ,"requirement":5}}},
-                    "weighting":"equal"}):
+    def __init__(self,start,end,name,weighting="equal",seats=5,strats={
+                    "rolling_percent":{"params":{"timeframe":"daily"
+                                                ,"requirement":5
+                                                ,"days":7
+                                                ,"value":True
+                                                ,"currency":"prices"}
+                                        },
+                    "progress_report":{"params":{"timeframe":"quarterly"
+                                                ,"requirement":5}
+                                    }
+                    }):
         self.start = start
         self.end = end
-        self.params = params
+        self.strats = strats
+        self.seats = seats
+        self.weighting = weighting
         super().__init__(name)
     
     @classmethod
     def required_params(self):
-        required = {"strats":{"rolling_percent":{"params":{"timeframe":"daily"
+        required = {"rolling_percent":{"params":{"timeframe":"daily"
                 ,"requirement":5
                 ,"days":7
                 ,"value":True
                 ,"currency":"prices"}},
                             "progress_report":{"params":{"timeframe":"quarterly"
-                    ,"requirement":5}}},
-                    "weighting":"equal"}
+                    ,"requirement":5}}}
         return required    
     
     def load(self):
-        for strat in tqdm(self.params["strats"]):
-            strat_params = self.params["strats"][strat]["params"]
+        for strat in tqdm(self.strats):
+            strat_params = self.strats[strat]["params"]
             strat_class = StratFact.create_strat(self.start,self.end,strat,strat_params)
             strat_class.subscribe()
             strat_class.load()
-            self.params["strats"][strat]["class"] = strat_class
+            self.strats[strat]["class"] = strat_class
 
     
     def sim(self):
-        for strat in tqdm(self.params["strats"]):
-            strat_class = self.params["strats"][strat]["class"]
+        for strat in tqdm(self.strats):
+            strat_class = self.strats[strat]["class"]
             strat_class.create_sim()
     
     def backtest(self):
-        for strat in tqdm(self.params["strats"]):
-            strat_class = self.params["strats"][strat]["class"]
-            strat_class.backtest()
+        trades = []
+        for strat in tqdm(self.strats.keys()):
+            try:
+                self.db.connect()
+                query = self.strats[strat]["params"]
+                query["strategy"] = strat
+                t = self.db.retrieve_trades(query)
+                self.db.disconnect()
+                if t.index.size < 1:
+                    strat_class = self.strats[strat]["class"]
+                    t = Backtester.equity_timeseries_backtest(self.start,self.end,self.seats,strat_class)
+                    t["strategy"] = strat
+                    t["delta"] = (t["sell_price"] - t["adjclose"]) / t["adjclose"]
+                    self.db.connect()
+                    self.db.store("trades",t)
+                    self.db.disconnect()
+                trades.append(t)
+            except Exception as e:
+                print(str(e))
+                continue   
+        self.trades = pd.concat(trades)
+        return self.trades
     
