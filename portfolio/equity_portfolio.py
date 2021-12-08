@@ -44,8 +44,15 @@ class EquityPortfolio(APortfolio):
             strat_class.subscribe()
             strat_class.load()
             self.strats[strat]["class"] = strat_class
-
-    
+        
+    def transform(self):
+        for strat in tqdm(self.strats):
+            strat_class = self.strats[strat]["class"]
+            if strat_class.ai:
+                strat_class.initial_transform()
+            else:
+                continue
+        
     def sim(self):
         for strat in tqdm(self.strats):
             strat_class = self.strats[strat]["class"]
@@ -64,6 +71,7 @@ class EquityPortfolio(APortfolio):
                     strat_class = self.strats[strat]["class"]
                     t = Backtester.equity_timeseries_backtest(self.start,self.end,self.seats,strat_class)
                     t["strategy"] = strat
+                    t.rename(columns={"adjClose":"adjclose"},errors="ignore",inplace=True)
                     t["delta"] = (t["sell_price"] - t["adjclose"]) / t["adjclose"]
                     self.db.connect()
                     self.db.store("trades",t)

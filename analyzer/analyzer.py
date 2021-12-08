@@ -8,6 +8,7 @@ class Analyzer(object):
         stuff = []
         total_cash = 100
         trades = portfolio.trades
+        trades = trades[(trades["date"] >= portfolio.start) & (trades["date"] <= portfolio.end)]
         trades["quarter"] = [x.quarter for x in trades["sell_date"]]
         trades["year"] = [x.year for x in trades["sell_date"]]
         if trades.index.size < 1:
@@ -26,7 +27,7 @@ class Analyzer(object):
             stuff.append(strat_trades)
         analysis = pd.concat(stuff).pivot_table(index=["strategy","date"],columns="seat",values="pv").fillna(method="ffill").fillna(float(total_cash / number_of_strats / portfolio.seats )).reset_index()
         analysis["pv"] = [sum([row[1][i] for i in range(portfolio.seats)]) for row in analysis.iterrows()]
-        final = analysis.pivot_table(index="date",columns="strategy",values="pv").fillna(method="ffill").reset_index()
+        final = analysis.pivot_table(index="date",columns="strategy",values="pv").fillna(method="ffill").fillna(float(total_cash / number_of_strats)).reset_index()
         return final
     
     @classmethod

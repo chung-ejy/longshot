@@ -4,6 +4,7 @@ from strategy.istrategy import IStrategy
 from database.strategy import Strategy
 from database.dbfact import DBFact
 from tqdm import tqdm
+
 class AStrategy(IStrategy):
     def __init__(self,name,start_date,end_date,subscriptions,params):
         self.name = name
@@ -17,6 +18,7 @@ class AStrategy(IStrategy):
         self.db.connect()
         self.simmed = self.db.retrieve_sim(self.params).index.size > 0 
         self.db.disconnect()
+        self.ai = False
         super().__init__()
     
     def subscribe(self):
@@ -41,7 +43,7 @@ class AStrategy(IStrategy):
                     else:
                         continue
             self.loaded = True
-    
+
     def create_record(self):
         return {
                 "name":self.name

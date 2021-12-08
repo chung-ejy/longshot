@@ -1,12 +1,12 @@
 import pandas as pd
-from strategy.astrategy import AStrategy
+from strategy.anaistrategy import AnAIStrategy
 from datetime import timedelta, datetime
 import pytz
 from tqdm import tqdm
 pd.options.mode.chained_assignment = None
 from modeler.modeler import Modeler as m
 
-class FinancialPredict(AStrategy):
+class FinancialPredict(AnAIStrategy):
     def __init__(self,start_date,end_date,params=
                         {"timeframe":"quarterly"
                     ,"score_requirement":70
@@ -14,25 +14,25 @@ class FinancialPredict(AStrategy):
                     ,"category_training_year":4
                     ,"model_training_year":4
                     ,"value":True}):
-        self.transformed=False
-        super().__init__(f"financial_predict",
+        super().__init__("financial_predict",
                             start_date,
                             end_date,
                         {"market":
                             {   "preload":True,
                                 "tables":
-                                { "prices":pd.DataFrame([{}]),
-                                "sp500":pd.DataFrame([{}]),
-                                "unified_financials":pd.DataFrame([{}])}
+                                { "prices":None,
+                                "sp500":None,
+                                "unified_financials":None}
                             },
                         "stock_category":{
                             "preload":True,
                             "tables":{
-                                "sim":pd.DataFrame([{}])
+                                "sim":None
                             }
                         }},
                         params
                      )
+        self.transformed = False
     @classmethod
     def required_params(self):
         required =  {"timeframe":"quarterly"
@@ -127,7 +127,7 @@ class FinancialPredict(AStrategy):
             for year in range(start_year,end_year):
                 for quarter in range(1,5):
                     quarterly_categories = labels[(labels["year"]==year) & (labels["quarter"]==quarter)]
-                    for category in labels["prediction"].unique():
+                    for category in list(labels["prediction"].unique()):
                         try:
                             category_tickers = labels[labels["prediction"]==category]["ticker"].unique()
                             training_factors = factors[factors["ticker"].isin(list(category_tickers))]
@@ -161,9 +161,9 @@ class FinancialPredict(AStrategy):
                             sim = sim[["year","quarter","ticker","quarterly_price_regression_prediction","score"]]
                             sim["model_training_year"] = model_training_year
                             sim["category_training_year"] = category_training_year
-                            sim = prices.merge(sim,on=["year","quarter","ticker"],how="right").dropna()
+                            sim = prices.merge(sim,on=["year","quarter","ticker"],how="left").dropna()
                             sim["delta"] = (sim["quarterly_price_regression_prediction"] - sim["adjClose"]) / sim["adjClose"]
-                            sim = sim[["year","quarter","ticker","adjClose","delta","score"]]
+                            sim = sim[["date","ticker","adjClose","delta","score"]].groupby(["date","ticker"]).mean().reset_index()
                             for param in self.params:
                                 sim[param]=self.params[param]
                             if sim.index.size > 1:
@@ -174,7 +174,7 @@ class FinancialPredict(AStrategy):
                             print(year,quarter,category,str(e)) 
                             continue
             self.simmed = True
-        return relevant
+        return sim
                
     def daily_recommendation(self,date,sim,seat):
         if not self.params["value"]:
@@ -185,12 +185,12 @@ class FinancialPredict(AStrategy):
             daily_rec = sim[(sim["date"]>=date) & 
                         (sim["delta"] >= float(self.params["requirement"]/100))]
         except:
-            daily_rec = sim[(sim["date"]>=date.astimezone(pytz.utc)) & 
+            daily_rec = sim[(sim["date"]>=date) & 
                         (sim["delta"] >= float(self.params["requirement"]/100))]
         daily_rec = daily_rec[daily_rec["date"]==daily_rec["date"].min()].sort_values("delta",ascending=False)
         try:
             if daily_rec.index.size >= seat:
-                result = daily_rec[["date","adjclose","ticker"]].iloc[seat].to_dict()
+                result = daily_rec[["date","adjClose","ticker"]].iloc[seat].to_dict()
                 result["seat"] = seat
                 return result
             else:
@@ -199,13 +199,13 @@ class FinancialPredict(AStrategy):
             return {"error":str(e)}
     
     def exit(self,sim,trade):
-        bp = trade["adjclose"]
-        sp = trade["adjclose"] * float(1+(self.params["requirement"]/100.0))
+        bp = trade["adjClose"]
+        sp = trade["adjClose"] * float(1+(self.params["requirement"]/100.0))
         try:
-            this_exit = sim[(sim["date"] > trade["date"]) & (sim["adjclose"]>=sp)
+            this_exit = sim[(sim["date"] > trade["date"]) & (sim["adjClose"]>=sp)
             & (sim["ticker"]==trade["ticker"])].sort_values("date").iloc[0]
         except:
-            this_exit = sim[(sim["date"] > trade["date"].astimezone(pytz.utc)) & (sim["adjclose"]>=sp)
+            this_exit = sim[(sim["date"] > trade["date"]) & (sim["adjClose"]>=sp)
             & (sim["ticker"]==trade["ticker"])].sort_values("date").iloc[0]
         trade["sell_date"] = this_exit["date"]
         trade["sell_price"] = sp

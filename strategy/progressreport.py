@@ -69,7 +69,7 @@ class ProgressReport(AStrategy):
             daily_rec = sim[(sim["date"]>=date) & 
                         (sim["delta"] >= float(self.params["requirement"]/100))]
         except:
-            daily_rec = sim[(sim["date"]>=date.astimezone(pytz.utc)) & 
+            daily_rec = sim[(sim["date"]>=date) & 
                         (sim["delta"] >= float(self.params["requirement"]/100))]
         daily_rec = daily_rec[daily_rec["date"]==daily_rec["date"].min()].sort_values("delta",ascending=False)
         try:

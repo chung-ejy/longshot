@@ -7,6 +7,10 @@ class Backtester(object):
         trades = []
         seats
         sim = strat.create_sim()
+        try:
+            sim["date"] = pd.to_datetime(sim["date"])
+        except Exception as e:
+            print(str(e))
         params = strat.params
         blacklist = []
         for seat in range(seats):
