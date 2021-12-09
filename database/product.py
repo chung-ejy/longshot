@@ -2,8 +2,8 @@ from database.adatabase import ADatabase
 import pandas as pd
 class Product(ADatabase):
     
-    def __init__(self,name,client):
-        super().__init__(name,client)
+    def __init__(self,name):
+        super().__init__(name)
 
     def retrieve_sim(self,params):
         try:

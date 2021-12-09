@@ -2,8 +2,8 @@ from database.adatabase import ADatabase
 import pandas as pd
 class SEC(ADatabase):
     
-    def __init__(self,client):
-        super().__init__("project_sec",client)
+    def __init__(self):
+        super().__init__("project_sec")
 
     def retrieve_num_data(self,adsh):
         try:

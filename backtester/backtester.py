@@ -11,7 +11,7 @@ class Backtester(object):
         sim = p.column_date_processing(sim)
         params = strat.params
         blacklist = []
-        for seat in range(seats):
+        for seat in tqdm(range(seats),desc="backtesting_seats"):
             date = start_date
             while date < end_date:
                 try:

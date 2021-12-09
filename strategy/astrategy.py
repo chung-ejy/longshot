@@ -25,6 +25,8 @@ class AStrategy(IStrategy):
         for subscription in self.subscriptions:
             self.subscriptions[subscription]["db"] = DBFact.subscribe(subscription)
         self.subscribed = True
+
+
     
     def create_sim(self):
         if self.simmed:

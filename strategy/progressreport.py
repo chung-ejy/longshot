@@ -31,13 +31,11 @@ class ProgressReport(AStrategy):
             end_year = self.end_date.year
             market = self.subscriptions["market"]["db"]
             market.connect()
+            self.db.connect()
             tickers = market.retrieve_tickers("prices")
-            market.disconnect()
             sim = []
             for ticker in tqdm(tickers["ticker"].unique(),desc=f"{self.name}_sim"):
-                market.connect()
                 prices = market.retrieve_ticker_prices("prices",ticker)
-                market.disconnect()
                 prices = p.column_date_processing(prices)
                 prices["year"] = [x.year for x in prices["date"]]
                 prices["quarter"] = [x.quarter for x in prices["date"]]
@@ -52,12 +50,12 @@ class ProgressReport(AStrategy):
                             for param in self.params:
                                 ticker_data[param]=self.params[param]
                             sim.append(ticker_data)
-                            self.db.connect()
                             self.db.store("sim",ticker_data)
-                            self.db.disconnect()
                         except Exception as e:
                             continue
             sim = pd.concat(sim)
+            self.db.disconnect()
+            market.disconnect()
             self.simmed = True
         return sim
                

@@ -1,10 +1,9 @@
 from database.adatabase import ADatabase
 import pandas as pd
-from time import sleep
 class Market(ADatabase):
     
-    def __init__(self,client):
-        super().__init__("project_market",client)
+    def __init__(self):
+        super().__init__("project_market")
 
     def retrieve_tickers(self,currency):
         try:
@@ -20,7 +19,6 @@ class Market(ADatabase):
             db = self.client[self.name]
             table = db[currency]
             data = table.find({"ticker":ticker},{"_id":0},show_record_id=False)
-            sleep(1)
             return pd.DataFrame(list(data))
         except Exception as e:
             print(str(e))
