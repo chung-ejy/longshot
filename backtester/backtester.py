@@ -1,5 +1,6 @@
 
 from datetime import timedelta,datetime
+from processor.processor import Processor as p
 import pandas as pd
 class Backtester(object):
     @classmethod
@@ -7,10 +8,7 @@ class Backtester(object):
         trades = []
         seats
         sim = strat.create_sim()
-        try:
-            sim["date"] = pd.to_datetime(sim["date"])
-        except Exception as e:
-            print(str(e))
+        sim = p.column_date_processing(sim)
         params = strat.params
         blacklist = []
         for seat in range(seats):

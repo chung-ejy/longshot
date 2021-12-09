@@ -4,6 +4,7 @@ from datetime import timedelta
 import pytz
 from tqdm import tqdm
 pd.options.mode.chained_assignment = None
+from processor.processor import Processor as p
 class RollingPercent(AStrategy):
     def __init__(self,start_date,end_date,params=
                         {"timeframe":"daily"
@@ -15,11 +16,8 @@ class RollingPercent(AStrategy):
                             start_date,
                             end_date,
                         {"market":
-                            {   "preload":True,
-                                "tables":
-                                { params["currency"]:pd.DataFrame([{}])}
-                            }
-                        },
+                                {"tables":[params["currency"]]}
+                            },
                         params
                      )
     @classmethod
@@ -41,34 +39,30 @@ class RollingPercent(AStrategy):
         else:
             start_year = self.start_date.year
             end_year = self.end_date.year
-            prices = self.subscriptions["market"]["tables"][self.params["currency"]].copy()
-            new_cols = {}
-            for column in prices.columns:
-                new_cols[column] = column.lower().replace(" ","")
-            for col in new_cols:
-                prices.rename(columns={col:new_cols[col]},inplace=True)
-            try:
-                prices["date"] = pd.to_datetime(prices["Date"])
-            except:
-                prices["date"] = pd.to_datetime(prices["date"])
-            prices["year"] = [x.year for x in prices["date"]]
-            prices["quarter"] = [x.quarter for x in prices["date"]]
             sim = []
             days = self.params["days"]
-            for ticker in tqdm(prices["ticker"].unique()):
-                ticker_data = prices[prices["ticker"]==ticker]
-                relevant = ticker_data
-                relevant.sort_values("date",inplace=True)
-                relevant[f'rolling_{days}'] = relevant["adjclose"].rolling(window=days).mean()
-                relevant = relevant[(relevant["year"] >= start_year) & (relevant["year"]<=end_year)].dropna()
-                relevant["delta"] = (relevant[f"rolling_{days}"] - relevant["adjclose"]) / relevant[f"rolling_{days}"]
-                relevant = relevant[["date","adjclose","delta","ticker",f"rolling_{days}"]]
+            market = self.subscriptions["market"]["db"]
+            market.connect()
+            tickers = market.retrieve_tickers(self.params["currency"])
+            market.disconnect()
+            for ticker in tqdm(tickers["ticker"].unique(),desc=f'{self.name}_sim'):
+                market.connect()
+                prices = market.retrieve_ticker_prices(self.params["currency"],ticker)
+                market.disconnect()
+                prices = p.column_date_processing(prices)
+                prices["year"] = [x.year for x in prices["date"]]
+                prices["quarter"] = [x.quarter for x in prices["date"]]
+                prices.sort_values("date",inplace=True)
+                prices[f'rolling_{days}'] = prices["adjclose"].rolling(window=days).mean()
+                prices = prices[(prices["year"] >= start_year) & (prices["year"]<=end_year)].dropna()
+                prices["delta"] = (prices[f"rolling_{days}"] - prices["adjclose"]) / prices[f"rolling_{days}"]
+                prices = prices[["date","adjclose","delta","ticker",f"rolling_{days}"]]
                 for param in self.params:
-                    relevant[param]=self.params[param]
+                    prices[param]=self.params[param]
                 self.db.connect()
-                self.db.store("sim",relevant)
+                self.db.store("sim",prices)
                 self.db.disconnect()
-                sim.append(relevant)
+                sim.append(prices)
             sim = pd.concat(sim)
             self.simmed = True
         return sim

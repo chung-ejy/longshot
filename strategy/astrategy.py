@@ -25,31 +25,6 @@ class AStrategy(IStrategy):
         for subscription in self.subscriptions:
             self.subscriptions[subscription]["db"] = DBFact.subscribe(subscription)
         self.subscribed = True
-
-    def load(self):
-        if self.simmed:
-            self.loaded = True
-        else:
-            if not self.subscribed:
-                self.subscribe()
-            else:
-                for subscription in tqdm(self.subscriptions):
-                    if self.subscriptions[subscription]["preload"]:
-                        db = self.subscriptions[subscription]["db"]
-                        for table in self.subscriptions[subscription]["tables"]:
-                            db.connect()
-                            self.subscriptions[subscription]["tables"][table] = db.retrieve(table)
-                            db.disconnect()
-                    else:
-                        continue
-            self.loaded = True
-
-    def create_record(self):
-        return {
-                "name":self.name
-                # ,"subscriptions":[{subscription:{"table":self.subscriptions[subscription]["table"]}} for subscription in self.subscriptions]
-                # ,"timeperiod":self.timeperiod
-                }
     
     def create_sim(self):
         if self.simmed:

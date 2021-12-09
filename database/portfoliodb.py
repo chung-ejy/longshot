@@ -3,8 +3,8 @@ import pandas as pd
 
 class PortfolioDb(ADatabase):
     
-    def __init__(self,name):
-        super().__init__(name)
+    def __init__(self,name,client):
+        super().__init__(name,client)
     
     def retrieve_trades(self,params):
         try:

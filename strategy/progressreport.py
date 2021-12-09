@@ -1,8 +1,10 @@
 import pandas as pd
 from strategy.astrategy import AStrategy
+from processor.processor import Processor as p
 from datetime import timedelta
 import pytz
 from tqdm import tqdm
+from time import sleep
 pd.options.mode.chained_assignment = None
 class ProgressReport(AStrategy):
     def __init__(self,start_date,end_date,params={"timeframe":"quarterly"
@@ -10,11 +12,8 @@ class ProgressReport(AStrategy):
         super().__init__(f"progress_report",
                             start_date,
                             end_date,
-                        {"market":{"preload":True,
-                            "tables":{"prices":pd.DataFrame([{
-
-                            }])}
-                            }}
+                        {"market":{}
+                            }
                             ,params)
     @classmethod
     def required_params(self):
@@ -30,23 +29,22 @@ class ProgressReport(AStrategy):
         else:
             start_year = self.start_date.year
             end_year = self.end_date.year
-            prices = self.subscriptions["market"]["tables"]["prices"].copy()
-            new_cols = {}
-            for column in prices.columns:
-                new_cols[column] = column.lower().replace(" ","")
-            for col in new_cols:
-                prices.rename(columns={col:new_cols[col]},inplace=True)
-            prices["date"] = pd.to_datetime(prices["date"])
-            prices["year"] = [x.year for x in prices["date"]]
-            prices["quarter"] = [x.quarter for x in prices["date"]]
+            market = self.subscriptions["market"]["db"]
+            market.connect()
+            tickers = market.retrieve_tickers("prices")
+            market.disconnect()
             sim = []
-            self.db.connect()
-            for year in tqdm(range(start_year,end_year)):
-                for quarter in range(1,5):
-                    quarterly = prices[(prices["year"]==year) & (prices["quarter"]==quarter)]
-                    for ticker in prices["ticker"].unique():
+            for ticker in tqdm(tickers["ticker"].unique(),desc=f"{self.name}_sim"):
+                market.connect()
+                prices = market.retrieve_ticker_prices("prices",ticker)
+                market.disconnect()
+                prices = p.column_date_processing(prices)
+                prices["year"] = [x.year for x in prices["date"]]
+                prices["quarter"] = [x.quarter for x in prices["date"]]
+                for year in range(start_year,end_year):
+                    for quarter in range(1,5):
                         try:
-                            ticker_data = quarterly[quarterly["ticker"]==ticker].sort_values("date")
+                            ticker_data = prices[(prices["year"]==year) & (prices["quarter"]==quarter)].sort_values("date")
                             sp = ticker_data.iloc[0]["adjclose"].item()
                             ticker_data["quarter_start"] = sp
                             ticker_data["delta"] = (ticker_data["adjclose"] - sp) / sp
@@ -54,11 +52,12 @@ class ProgressReport(AStrategy):
                             for param in self.params:
                                 ticker_data[param]=self.params[param]
                             sim.append(ticker_data)
+                            self.db.connect()
                             self.db.store("sim",ticker_data)
+                            self.db.disconnect()
                         except Exception as e:
                             continue
             sim = pd.concat(sim)
-            self.db.disconnect()
             self.simmed = True
         return sim
                

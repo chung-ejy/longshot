@@ -4,16 +4,11 @@ from database.idatabase import IDatabase
 import asyncio
 class ADatabase(IDatabase):
     
-    def __init__(self,name):
+    def __init__(self,name,client):
         self.name = name
+        self.client = client
         super().__init__()
     
-    def connect(self):
-        self.client = MongoClient("localhost",27017)
-    
-    def disconnect(self):
-        self.client.close()
-
     def store(self,table_name,data):
         try:
             db = self.client[self.name]
@@ -31,15 +26,6 @@ class ADatabase(IDatabase):
             return pd.DataFrame(list(data))
         except Exception as e:
             print(self.name,table_name,str(e))
-
-    # async def retrieve_helper(self,table_name):
-    #     try:
-    #         db = await self.client[self.name]
-    #         table = await db[table_name]
-    #         data = await table.find({},{"_id":0},show_record_id=False)
-    #         return pd.DataFrame(list(data))
-    #     except Exception as e:
-    #         print(self.name,table_name,str(e))
 
     def delete(self,table_name,query):
         try:
