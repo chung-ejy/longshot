@@ -7,6 +7,7 @@ from tqdm import tqdm
 pd.options.mode.chained_assignment = None
 from datetime import datetime, timedelta, timezone
 from backtester.backtester import Backtester
+from tqdm import tqdm
 class EquityPortfolio(APortfolio):
     def __init__(self,start,end,name,weighting="equal",seats=5,strats={
                     "rolling_percent":{"params":{"timeframe":"daily"
@@ -42,7 +43,6 @@ class EquityPortfolio(APortfolio):
             strat_params = self.strats[strat]["params"]
             strat_class = StratFact.create_strat(self.start,self.end,strat,strat_params)
             strat_class.subscribe()
-            strat_class.load()
             self.strats[strat]["class"] = strat_class
         
     def transform(self):

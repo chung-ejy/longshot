@@ -5,89 +5,75 @@ import pytz
 from tqdm import tqdm
 pd.options.mode.chained_assignment = None
 from modeler.modeler import Modeler as m
-
+from processor.processor import Processor as p
+import numpy as np
 class FinancialPredict(AnAIStrategy):
     def __init__(self,start_date,end_date,params=
-                        {"timeframe":"quarterly"
-                    ,"score_requirement":70
-                    ,"requirement":10
-                    ,"category_training_year":4
-                    ,"model_training_year":4
-                    ,"value":True}):
+                        {"modeling":{
+                            "score_requirement":70
+                            ,"categories":2
+                            ,"model_training_year":4},
+                    "trading": {
+                    "requirement":10
+                    ,"value":True }
+                    }):
         super().__init__("financial_predict",
                             start_date,
                             end_date,
-                        {"market":
-                            {   "preload":True,
-                                "tables":
-                                { "prices":None,
-                                "sp500":None,
-                                "unified_financials":None}
-                            },
-                        "stock_category":{
-                            "preload":True,
-                            "tables":{
-                                "sim":None
-                            }
-                        }},
+                        {"market":{},
+                        "stock_category":{}},
                         params
                      )
         self.transformed = False
+
     @classmethod
     def required_params(self):
-        required =  {"timeframe":"quarterly"
-                    ,"requirement":10
-                    ,"value":True}
+        required =   {"modeling":{
+                            "score_requirement":70
+                            ,"model_training_year":4
+                            ,"categories":2},
+                    "trading": {
+                    "requirement":10
+                    ,"value":True }
+                    }
         return required
 
     def initial_transform(self):
         self.db.connect()
         data = self.db.retrieve("transformed")
         self.db.disconnect()
-        financials = self.subscriptions["market"]["tables"]["unified_financials"]
-        categories = self.subscriptions["stock_category"]["tables"]["sim"]
-        prices = self.subscriptions["market"]["tables"]["prices"]
-        sp5 = self.subscriptions["market"]["tables"]["sp500"]
-        for i in range(40):
-            financials.drop(str(i),inplace=True,axis=1,errors="ignore")
-        cats = categories["prediction"].unique()
-        categories["prediction"] = [x if x in cats else "None" for x in categories["prediction"]]
-        categories["prediction"] = [x if x != None else "None" for x in categories["prediction"]]
-        prices["date"] = pd.to_datetime(prices["date"])
-        prices["year"] = [x.year for x in prices["date"]]
-        prices["quarter"] = [x.quarter for x in prices["date"]]
-        prices["week"] = [x.week for x in prices["date"]]
-        financials["year"] = [row[1]["year"] + 1 if row[1]["quarter"] == 4 else row[1]["year"] for row in financials.iterrows()]
-        financials["quarter"] = [1 if row[1]["quarter"] == 4 else row[1]["quarter"] + 1 for row in financials.iterrows()]
-        financials = financials.groupby(["year","quarter","ticker"]).mean().reset_index()
-        financials["date"] = [datetime(row[1]["year"], row[1]["quarter"] * 3 -  2, 1) for row in financials.iterrows()]
-        valid = []
-        for ticker in financials["ticker"].unique():
-            if financials[financials["ticker"]==ticker].index.size == 49:
-                valid.append(ticker)
-        quarterly_sets = []
-        start = self.start_date.year
-        end = self.end_date.year
         if self.transformed or data.index.size > 1:
             self.transformed = True
             return data
         else:
-            prices = prices[(prices["year"] >= start) & (prices["year"] <= end)]
-            for ticker in tqdm(sp5["Symbol"].unique()):
-                ticker_data = prices[prices["ticker"]==ticker]
-                quarterly = ticker_data.groupby(["year","quarter"]).mean().reset_index()
-                quarterly["y"] = quarterly["adjClose"].shift(-1)
-                quarterly.dropna(inplace=True)
-                quarterly["ticker"] = ticker
-                quarterly_sets.append(quarterly)
-            initial_data = pd.concat(quarterly_sets)
-            initial_data["date"] = [datetime(row[1]["year"], row[1]["quarter"] * 3 -  2, 1) for row in initial_data.iterrows()]
-            for param in self.params:
-                initial_data[param] = self.params[param]
+            market = self.subscriptions["market"]["db"]
+            quarterly_sets = []
+            start = self.start_date.year
+            end = self.end_date.year
+            market.connect()
+            sp5 = market.retrieve("sp500")
             self.db.connect()
-            self.db.store("transformed",initial_data)
-            self.db.disconnect()
+            for ticker in tqdm(sp5["Symbol"].unique()):
+                try:
+                    prices = market.retrieve_ticker_prices("prices",ticker)
+                    prices = p.column_date_processing(prices)
+                    prices["year"] = [x.year for x in prices["date"]]
+                    prices["quarter"] = [x.quarter for x in prices["date"]]
+                    prices["week"] = [x.week for x in prices["date"]]
+                    quarterly = prices.groupby(["year","quarter"]).mean().reset_index()
+                    quarterly["y"] = quarterly["adjclose"].shift(-1)
+                    quarterly.dropna(inplace=True)
+                    quarterly["ticker"] = ticker
+                    quarterly["date"] = [datetime(row[1]["year"], row[1]["quarter"] * 3 -  2, 1) for row in quarterly.iterrows()]
+                    self.db.store("transformed",quarterly)          
+                    quarterly_sets.append(quarterly)
+                except Exception as e:
+                    print(ticker,str(e))
+                    continue
+            initial_data = pd.concat(quarterly_sets)
             self.transformed = True
+            market.disconnect()
+            self.db.disconnect()
         return initial_data
 
     def create_sim(self):
@@ -98,38 +84,40 @@ class FinancialPredict(AnAIStrategy):
             self.simmed = True
             return sim
         else:
-            start_year = self.start_date.year
-            end_year = self.end_date.year
-            prices = self.subscriptions["market"]["tables"]["prices"].copy()
-            financial_factors = ['AccumulatedOtherComprehensiveIncomeLossNetOfTax', 'Assets',
-                                'AssetsCurrent', 'CashAndCashEquivalentsAtCarryingValue',
-                                'EarningsPerShareBasic', 'EarningsPerShareDiluted',
-                                'EntityCommonStockSharesOutstanding', 'IncomeTaxExpenseBenefit',
-                                'LiabilitiesAndStockholdersEquity', 'LiabilitiesCurrent',
-                                'NetIncomeLoss', 'OtherAssetsNoncurrent',
-                                'RetainedEarningsAccumulatedDeficit', 'StockholdersEquity','CommonStockValue', 'Goodwill',
-                                'PropertyPlantAndEquipmentNet']
+            market = self.subscriptions["market"]["db"]
+            product_db = self.subscriptions["stock_category"]["db"]
+            categories_nums = self.params["modeling"]["categories"]
+            market.connect()
+            product_db.connect()
+            financials = market.retrieve("unified_financials")
+            sp5 = market.retrieve("sp500")
+            categories = product_db.retrieve("sim")
+            product_db.disconnect()
+            for i in range(40):
+                financials.drop(str(i),inplace=True,axis=1,errors="ignore")
+            financials["year"] = [row[1]["year"] + 1 if row[1]["quarter"] == 4 else row[1]["year"] for row in financials.iterrows()]
+            financials["quarter"] = [1 if row[1]["quarter"] == 4 else row[1]["quarter"] + 1 for row in financials.iterrows()]
+            financials = financials.groupby(["year","quarter","ticker"]).mean().reset_index()
+            financials["date"] = [datetime(row[1]["year"], row[1]["quarter"] * 3 -  2, 1) for row in financials.iterrows()]
+            start = self.start_date.year
+            end = self.end_date.year
+            financial_factors = [x for x in financials.columns if x not in ["year","quarter","ticker","date"]]
             yearly_gap = 1
-            analysis = []
             self.db.connect()
             initial_data = self.db.retrieve("transformed")
-            self.db.disconnect()
-            for col in self.params.keys():
-                initial_data.drop(col,axis=1,inplace=True)
-            financials = self.subscriptions["market"]["tables"]["unified_financials"]
-            categories = self.subscriptions["stock_category"]["tables"]["sim"]
-            category_training_year = self.params["category_training_year"]
-            subset_categories = categories[categories["training_years"]==category_training_year]
-            labels = initial_data.merge(subset_categories,on=["year","quarter","ticker"],how="left")
-            factors = financials.merge(subset_categories,on=["year","quarter","ticker"],how="left")
+            labels = initial_data.merge(categories,on=["year","quarter","ticker"],how="left")
+            factors = financials.merge(categories,on=["year","quarter","ticker"],how="left")
             factors["date"] = [datetime(row[1]["year"], row[1]["quarter"] * 3 -  2, 1) for row in factors.iterrows()]
-            model_training_year = self.params["model_training_year"]
-            for year in range(start_year,end_year):
+            model_training_year = self.params["modeling"]["model_training_year"]
+            start_year = self.start_date.year
+            end_year = self.end_date.year
+            sims = []
+            for year in tqdm(range(start_year,end_year+1),desc="financial_predict_sim_year"):
                 for quarter in range(1,5):
                     quarterly_categories = labels[(labels["year"]==year) & (labels["quarter"]==quarter)]
-                    for category in list(labels["prediction"].unique()):
+                    for category in list(labels[f"{categories_nums}_classification"].unique()):
                         try:
-                            category_tickers = labels[labels["prediction"]==category]["ticker"].unique()
+                            category_tickers = labels[labels[f"{categories_nums}_classification"]==category]["ticker"].unique()
                             training_factors = factors[factors["ticker"].isin(list(category_tickers))]
                             training_factors.sort_values("date",inplace=True)
                             if quarter == 1:
@@ -148,33 +136,52 @@ class FinancialPredict(AnAIStrategy):
                             relevant_labels = training_labels[(training_labels["year"] < year) & (training_labels["year"]>=year-model_training_year)]
                             prediction_data = training_factors[(training_factors["year"]==year) & (training_factors["quarter"]==quarter)]
                             relevant = relevant_factors.merge(relevant_labels,on=["year","quarter","ticker"],how="left").dropna()
+                            relevant.reset_index(inplace=True)
+                            print(year,quarter,category,len(category_tickers),relevant.index.size,prediction_data.index.size)
                             X = relevant[financial_factors]
-                            y = relevant["adjClose"]
-                            xgb_models = m.xgb_regression({"X":X,"y":y})
-                            sk_models = m.sk_regression({"X":X,"y":y})
-                            sk_models.append(xgb_models)
-                            models = pd.DataFrame(sk_models)
-                            model = models.sort_values("score",ascending=False).iloc[0]
+                            y = relevant["adjclose"]
+                            models = m.regression({"X":X,"y":y})
+                            models["year"] = year
+                            models["quarter"] = quarter
+                            models["category"] = category
                             sim = prediction_data
-                            sim["quarterly_price_regression_prediction"] = model["model"].predict(sim[financial_factors])
-                            sim["score"] = model["score"].item()
-                            sim = sim[["year","quarter","ticker","quarterly_price_regression_prediction","score"]]
-                            sim["model_training_year"] = model_training_year
-                            sim["category_training_year"] = category_training_year
+                            sim = sim.groupby(["year","quarter","ticker"]).mean().reset_index()
+                            for i in range(models.index.size):
+                                model = models.iloc[i]
+                                api = model["api"]
+                                score = model["score"]
+                                if score >= self.params["modeling"]["score_requirement"]/100:
+                                    sim[f"{api}_prediction"] = model["model"].predict(sim[financial_factors])
+                                    sim[f"{api}_score"] = model["score"].item()
+                            stuff = []
+                            for ticker in category_tickers:
+                                ticker_data = market.retrieve_ticker_prices("prices",ticker)
+                                stuff.append(ticker_data)
+                            prices = p.column_date_processing(pd.concat(stuff))
+                            prices["year"] = [x.year for x in prices["date"]]
+                            prices["quarter"] = [x.quarter for x in prices["date"]]
                             sim = prices.merge(sim,on=["year","quarter","ticker"],how="left").dropna()
-                            sim["delta"] = (sim["quarterly_price_regression_prediction"] - sim["adjClose"]) / sim["adjClose"]
-                            sim = sim[["date","ticker","adjClose","delta","score"]].groupby(["date","ticker"]).mean().reset_index()
-                            for param in self.params:
-                                sim[param]=self.params[param]
+                            sim["categories"] = categories_nums
+                            final_cols = ["date","ticker","adjclose","categories"]
+                            final_cols.extend([x for x in list(sim.columns) if "prediction" in x or "score" in x])
+                            sim = sim[final_cols]
+                            sim.fillna(0,inplace=True)
+                            sim["prediction"] = [np.nanmean([row[1][x] for x in sim.columns if "prediction" in x and row[1][x] != 0]) for row in sim.iterrows()]
+                            sim["score"] = [np.nanmean([row[1][x] for x in sim.columns if "score" in x and row[1][x] != 0]) for row in sim.iterrows()]
+                            sim["delta"] = (sim["prediction"] - sim["adjclose"]) / sim["adjclose"]
+                            for param in self.params["modeling"]:
+                                sim[param]=self.params["modeling"][param]
                             if sim.index.size > 1:
-                                self.db.connect()
                                 self.db.store("sim",sim)
-                                self.db.disconnect()
+                                sims.append(sim)
+                            sims.append(sim)
                         except Exception as e:
                             print(year,quarter,category,str(e)) 
                             continue
             self.simmed = True
-        return sim
+            self.db.disconnect()
+            market.disconnect()
+            return pd.concat(sims)
                
     def daily_recommendation(self,date,sim,seat):
         if not self.params["value"]:
@@ -190,7 +197,7 @@ class FinancialPredict(AnAIStrategy):
         daily_rec = daily_rec[daily_rec["date"]==daily_rec["date"].min()].sort_values("delta",ascending=False)
         try:
             if daily_rec.index.size >= seat:
-                result = daily_rec[["date","adjClose","ticker"]].iloc[seat].to_dict()
+                result = daily_rec[["date","adjclose","ticker"]].iloc[seat].to_dict()
                 result["seat"] = seat
                 return result
             else:
@@ -199,13 +206,13 @@ class FinancialPredict(AnAIStrategy):
             return {"error":str(e)}
     
     def exit(self,sim,trade):
-        bp = trade["adjClose"]
-        sp = trade["adjClose"] * float(1+(self.params["requirement"]/100.0))
+        bp = trade["adjclose"]
+        sp = trade["adjclose"] * float(1+(self.params["requirement"]/100.0))
         try:
-            this_exit = sim[(sim["date"] > trade["date"]) & (sim["adjClose"]>=sp)
+            this_exit = sim[(sim["date"] > trade["date"]) & (sim["adjclose"]>=sp)
             & (sim["ticker"]==trade["ticker"])].sort_values("date").iloc[0]
         except:
-            this_exit = sim[(sim["date"] > trade["date"]) & (sim["adjClose"]>=sp)
+            this_exit = sim[(sim["date"] > trade["date"]) & (sim["adjclose"]>=sp)
             & (sim["ticker"]==trade["ticker"])].sort_values("date").iloc[0]
         trade["sell_date"] = this_exit["date"]
         trade["sell_price"] = sp

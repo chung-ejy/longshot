@@ -2,6 +2,7 @@
 from datetime import timedelta,datetime
 from processor.processor import Processor as p
 import pandas as pd
+from tqdm import tqdm
 class Backtester(object):
     @classmethod
     def equity_timeseries_backtest(self,start_date,end_date,seats,strat):

@@ -13,8 +13,8 @@ import pandas as pd
 import xgboost as xgb
 from xgboost.sklearn import XGBClassifier
 from xgboost.training import train
-# from catboost import CatBoostRegressor
-# from lightgbm import LGBMRegressor
+from catboost import CatBoostRegressor, CatBoostClassifier
+from lightgbm import LGBMRegressor, LGBMClassifier, early_stopping, log_evaluation
 import warnings
 warnings.filterwarnings(action='ignore')
 
@@ -24,29 +24,28 @@ class Modeler(object):
     def classification(self,data,xgb,sk,multioutput):
         results = []
         data["y"] = data["y"].drop("y",axis=1,errors="ignore")
-        if sk:
-            sk_result = self.sk_classify(data,multioutput)
-            results.append(sk_result)
-        if xgb:
-            xgb_result = self.xgb_classify(data,multioutput)
-            results.append(xgb_result)
+        sk_result = self.sk_classify(data,multioutput)
+        results.append(sk_result)
+        xgb_result = self.xgb_classify(data,multioutput)
+        results.append(xgb_result)
+        results.append(self.light_classify(data))
+        results.append(self.cat_classify(data))
         df = pd.DataFrame(results)
         df["model_type"] = "classification"
-        return df.sort_values("score",ascending=False).iloc[0]
+        return df.sort_values("score",ascending=False)
 
     @classmethod
-    def regression(self,data,xgb,sk):
+    def regression(self,data):
         results = []
-        data["y"] = data["y"].drop("y",axis=1,errors="ignore")
-        if sk:
-            sk_result = self.sk_regression(data)
-            results.append(sk_result)
-        if xgb:
-            xgb_result = self.xgb_regression(data)
-            results.append(xgb_result)
+        sk_result = self.sk_regression(data)
+        results.extend(sk_result)
+        xgb_result = self.xgb_regression(data)
+        results.append(xgb_result)
+        results.append(self.light_regression(data))
+        results.append(self.cat_regression(data))
         df = pd.DataFrame(results)
         df["model_type"] = "regression"
-        return df.sort_values("score",ascending=False).iloc[0]
+        return df
     
     @classmethod
     def xgb_regression(self,data):
@@ -61,62 +60,46 @@ class Modeler(object):
             return {"api":"xgb","model":model,"score":score}
         except Exception as e:
             print(str(e))
-    
-    # @classmethod
-    # def light_regression(self,data):
-    #     try:
-    #         params = {"boosting_type":["gbdt","goss","dart","rf"]}
-    #         X_train, X_test, y_train, y_test = self.shuffle_split(data)
-    #         gs = GridSearchCV(LGBMRegressor(verbosity = 0),param_grid=params,scoring="r2")
-    #         gs.fit(X_train,y_train)
-    #         predictions = gs.predict(X_test)
-    #         score = r2_score(predictions,y_test)
-    #         model = gs.best_estimator_
-    #         return {"api":"light","model":model,"score":score}
-    #     except Exception as e:
-    #         print(str(e))
-    
-    # @classmethod
-    # def cat_regression(self,data):
-    #     try:
-    #         params = {"boosting_type":["Ordered","Plain"]}
-    #         X_train, X_test, y_train, y_test = self.shuffle_split(data)
-    #         gs = GridSearchCV(CatBoostRegressor(),param_grid=params,scoring="r2")
-    #         gs.fit(X_train,y_train)
-    #         predictions = gs.predict(X_test)
-    #         score = r2_score(predictions,y_test)
-    #         model = gs.best_estimator_
-    #         return {"api":"cat","model":model,"score":score}
-    #     except Exception as e:
-    #         print(str(e))
+            return {"api":"xgb","model":str(e),"score":-99999}
     
     @classmethod
-    def xgb_classify(self,data,multioutput):
+    def light_regression(self,data):
         try:
-            params = {"booster":["gbtree","gblinear","dart"]}
+            params = {"boosting_type":["gbdt","goss","dart","rf"]
+                        }
             X_train, X_test, y_train, y_test = self.shuffle_split(data)
-            if multioutput:
-                gs = MultiOutputClassifier(XGBClassifier(eval_metric="logloss"))
-                gs.fit(X_train,y_train)
-                model = gs
-            else:
-                gs = GridSearchCV(xgb.XGBClassifier(objective="binary:logistic",eval_metric="logloss"),params_grid=params,scoring="accuracy")
-                y_train = LabelEncoder().fit(y_train).transform(y_train)
-                gs.fit(X_train,y_train)
-                y_test = LabelEncoder().fit(y_test).transform(y_test)
-                model = gs.best_estimator_
-            score = accuracy_score(model.predict(X_test),y_test)
-            return {"api":"xgb","model":model,"score":score}
+            gs = GridSearchCV(LGBMRegressor(early_stopping_round=10,verbosity = -1,force_col_wise=True),param_grid=params,scoring="r2")
+            gs.fit(X_train,y_train)
+            predictions = gs.predict(X_test)
+            score = r2_score(predictions,y_test)
+            model = gs.best_estimator_
+            return {"api":"light","model":model,"score":score}
         except Exception as e:
             print(str(e))
+            return {"api":"light","model":str(e),"score":-99999}
+    
+    @classmethod
+    def cat_regression(self,data):
+        try:
+            params = {"boosting_type":["Ordered","Plain"]}
+            X_train, X_test, y_train, y_test = self.shuffle_split(data)
+            gs = GridSearchCV(CatBoostRegressor(verbose=False,early_stopping_rounds=10),param_grid=params,scoring="r2")
+            gs.fit(X_train,y_train)
+            predictions = gs.predict(X_test)
+            score = r2_score(predictions,y_test)
+            model = gs.best_estimator_
+            return {"api":"cat","model":model,"score":score}
+        except Exception as e:
+            print(str(e))
+            return {"api":"cat","model":str(e),"score":-99999}
     
     @classmethod
     def sk_regression(self,data):
         stuff = {
-            "sgd" : {"model":SGDRegressor(fit_intercept=True),"params":{"loss":["squared_loss","huber"]
-                                                            ,"learning_rate":["constant","optimal","adaptive"]
-                                                            ,"alpha" : [0.0001,0.001, 0.01, 0.1, 0.2, 0.5, 1]}},
-            "r" : {"model":RidgeCV(alphas=[0.0001,0.001, 0.01, 0.1, 0.2, 0.5, 1],fit_intercept=True),"params":{}},
+            # "sgd" : {"model":SGDRegressor(fit_intercept=True),"params":{"loss":["squared_loss","huber"]
+            #                                                 ,"learning_rate":["constant","optimal","adaptive"]
+            #                                                 ,"alpha" : [0.0001,0.001, 0.01, 0.1, 0.2, 0.5, 1]}},
+            # "r" : {"model":RidgeCV(alphas=[0.0001,0.001, 0.01, 0.1, 0.2, 0.5, 1],fit_intercept=True),"params":{}},
             "lr" : {"model":LinearRegression(fit_intercept=True),"params":{"fit_intercept":[True,False]}}
         }
         X_train, X_test, y_train, y_test = self.shuffle_split(data)
@@ -133,30 +116,114 @@ class Modeler(object):
                 print(str(e))
                 results.append({"api":"skl","model":str(e),"score":-99999})
         return results
+
+    @classmethod
+    def cat_classify(self,data,multioutput):
+        try:
+            params = {"boosting_type":["Ordered","Plain"]}
+            X_train, X_test, y_train, y_test = self.shuffle_split(data)
+            if multioutput:
+                gs = GridSearchCV(CatBoostClassifier(verbose=False),param_grid=params,scoring="accuracy")
+                gs.fit(X_train,y_train)
+                model = gs.best_estimator_
+            else:
+                gs = GridSearchCV(CatBoostClassifier(verbose=False),param_grid=params,scoring="accuracy")
+                y_train = LabelEncoder().fit(y_train).transform(y_train)
+                gs.fit(X_train,y_train)
+                y_test = LabelEncoder().fit(y_test).transform(y_test)
+                model = gs.best_estimator_
+            score = accuracy_score(model.predict(X_test),y_test)
+            return {"api":"cat","model":model,"score":score}
+        except Exception as e:
+            print(str(e))
+            return {"api":"cat","model":str(e),"score":-99999}
     
+    @classmethod
+    def light_classify(self,data,multioutput):
+        try:
+            params = {"boosting_type":["gbdt","goss","dart","rf"]}
+            X_train, X_test, y_train, y_test = self.shuffle_split(data)
+            if multioutput:
+                models = []
+                for booster in params["boosting_type"]:
+                    try:
+                        gs = MultiOutputClassifier(LGBMClassifier(verbosity = 0,force_col_wise=True,boosting_type=booster))
+                        gs.fit(X_train,y_train)
+                        model = gs
+                        score = accuracy_score(model.predict(X_test),y_test)
+                        models.append({"api":"light","model":model,"score":score})
+                    except Exception as e:
+                        models.append({"api":"light","model":str(e),"score":-99999})
+                        continue
+                return pd.DataFrame(models).sort_values("score",ascending=False).iloc[0]
+            else:
+                gs = GridSearchCV(LGBMClassifier(verbosity = 0,force_col_wise=True),param_grid=params,scoring="accuracy")
+                y_train = LabelEncoder().fit(y_train).transform(y_train)
+                gs.fit(X_train,y_train)
+                y_test = LabelEncoder().fit(y_test).transform(y_test)
+                model = gs.best_estimator_
+            score = accuracy_score(model.predict(X_test),y_test)
+            return {"api":"light","model":model,"score":score}
+        except Exception as e:
+            print(str(e))
+            return {"api":"light","model":str(e),"score":-99999}
+    
+    @classmethod
+    def xgb_classify(self,data,multioutput):
+        try:
+            params = {"booster":["gbtree","gblinear","dart"]}
+            X_train, X_test, y_train, y_test = self.shuffle_split(data)
+            if multioutput:
+                models = []
+                for booster in params["booster"]:
+                    try:
+                        gs = MultiOutputClassifier(XGBClassifier(eval_metric="logloss",booster=booster))
+                        gs.fit(X_train,y_train)
+                        model = gs
+                        score = accuracy_score(model.predict(X_test),y_test)
+                        models.append({"api":"xgb","model":model,"score":score})
+                    except Exception as e:
+                        models.append({"api":"xgb","model":str(e),"score":-99999})
+                        continue
+                return pd.DataFrame(models).sort_values("score",ascending=False).iloc[0]
+            else:
+                gs = GridSearchCV(xgb.XGBClassifier(objective="binary:logistic",eval_metric="logloss"),param_grid=params,scoring="accuracy")
+                y_train = LabelEncoder().fit(y_train).transform(y_train)
+                gs.fit(X_train,y_train)
+                y_test = LabelEncoder().fit(y_test).transform(y_test)
+                model = gs.best_estimator_
+            score = accuracy_score(model.predict(X_test),y_test)
+            return {"api":"xgb","model":model,"score":score}
+        except Exception as e:
+            print(str(e))
+            return {"api":"xgb","model":str(e),"score":-99999}
+
+    @classmethod
     def sk_classify(self,data,multioutput):
         results = []
-        vc = VotingClassifier(estimators=[("sgdc", SGDClassifier(early_stopping=True)),
+        vc = VotingClassifier(estimators=[
+                # ("sgdc", SGDClassifier(early_stopping=True)),
                 ("ridge", RidgeClassifier()),
                 ("tree",DecisionTreeClassifier()),
                 ("neighbors",KNeighborsClassifier()),
-                ("svc",SVC()),
+                # ("svc",SVC()),
                 ("g",GaussianNB()),
                 ("rfc",RandomForestClassifier())])
-        stuff = {"sgdc" : {"model":SGDClassifier(),"params":{"loss":["hinge","log","perceptron"]
-                                                                                ,"learning_rate":["constant","optimal","adaptive"]
-                                                                                ,"alpha" : [0.0001,0.001, 0.01, 0.1, 0.2, 0.5, 1]}},
+        stuff = {
+                # "sgdc" : {"model":SGDClassifier(),"params":{"loss":["hinge","log","perceptron"]
+                #                                 ,"learning_rate":["constant","optimal","adaptive"]
+                #                                 ,"alpha" : [0.0001,0.001, 0.01, 0.1, 0.2, 0.5, 1]}},
                 "ridge" : {"model":RidgeClassifier(),"params":{"alpha" : [0.0001,0.001, 0.01, 0.1, 0.2, 0.5, 1]}},
                 "tree":{"model":DecisionTreeClassifier(),"params":{'max_depth': range(1,11)}},
                 "neighbors":{"model":KNeighborsClassifier(),"params":{'knn__n_neighbors': range(1, 10)}},
-                "svc":{"model":SVC(),"params":{"kernel":["linear","poly","rbf"],"C":[0.001,0.01,0.1,1,10],"gamma":[0.001,0.01,0.1,1]}},
+                # "svc":{"model":SVC(),"params":{"kernel":["linear","poly","rbf"],"C":[0.001,0.01,0.1,1,10],"gamma":[0.001,0.01,0.1,1]}},
                 "g":{"model":GaussianNB(),"params":{}},
                 "rfc":{"model":RandomForestClassifier(),"params":{"criterion":["gini","entropy"]
                                                                 ,"n_estimators":[100,150,200]
                                                                 ,"max_depth":[None,1,3,5,10]
                                                                 ,"min_samples_split":[5,10]
                                                                 ,"min_samples_leaf":[5,10]}},
-                "vc":vc}
+                "vc":{"model":vc,"params":{}}}
         X_train, X_test, y_train, y_test = self.shuffle_split(data)
         results = []
         for classifier in stuff:
@@ -177,8 +244,12 @@ class Modeler(object):
                 results.append(result)
             except Exception as e:
                 results.append({"api":"skl","model":str(e),"score":-99999})
-        return results
+        return pd.DataFrame(results).sort_values("score",ascending=False).iloc[0]
     
     @classmethod
     def shuffle_split(self,data):
-        return train_test_split(data["X"],data["y"],train_size=0.75,test_size=0.25,random_state=42)
+        X_test = data["X"].iloc[::4]
+        X_train = data["X"].drop(index=[x for x in range(0,data["X"].index.size,4)])
+        y_test = data["y"].iloc[::4]
+        y_train = data["y"].drop(index=[x for x in range(0,data["y"].index.size,4)])
+        return [X_train, X_test, y_train, y_test]

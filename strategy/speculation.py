@@ -5,6 +5,7 @@ import pytz
 from tqdm import tqdm
 pd.options.mode.chained_assignment = None
 from modeler.modeler import Modeler as m
+from processor.processor import Processor as p
 
 class Speculation(AnAIStrategy):
     def __init__(self,start_date,end_date,params=
@@ -18,21 +19,12 @@ class Speculation(AnAIStrategy):
         super().__init__("speculation",
                             start_date,
                             end_date,
-                        {"market":
-                            {   "preload":True,
-                                "tables":
-                                { "prices":None,
-                                "sp500":None}
-                            },
-                        "stock_category":{
-                            "preload":True,
-                            "tables":{
-                                "sim":None
-                            }
-                        }},
+                        {"market":{},
+                        "stock_category":{}},
                         params
                      )
         self.transformed = False
+
     @classmethod
     def required_params(self):
         required =  {"timeframe":"weekly"
@@ -45,42 +37,39 @@ class Speculation(AnAIStrategy):
     def initial_transform(self):
         self.db.connect()
         data = self.db.retrieve("transformed")
-        self.db.disconnect()
-        categories = self.subscriptions["stock_category"]["tables"]["sim"]
-        prices = self.subscriptions["market"]["tables"]["prices"]
-        sp5 = self.subscriptions["market"]["tables"]["sp500"]
-        start = self.start_date.year
-        end = self.end_date.year
-        prices["date"] = pd.to_datetime(prices["date"])
-        prices["year"] = [x.year for x in prices["date"]]
-        prices["quarter"] = [x.quarter for x in prices["date"]]
-        prices["week"] = [x.week for x in prices["date"]]
-        weekly_gap = 1
-        number_of_training_weeks = self.params["number_of_training_weeks"]
-        weekly_sets = []
+        market = self.subscriptions["market"]["db"]
         if self.transformed or data.index.size > 1:
             self.transformed = True
             return data
         else:
-            prices = prices[(prices["year"] >= start - self.params["model_training_year"] - 1) & (prices["year"] <= end)]
-            for ticker in tqdm(sp5["Symbol"].unique()):
-                ticker_data = prices[prices["ticker"]==ticker]
-                weekly = ticker_data.groupby(["year","quarter","week"]).mean().reset_index()
-                for i in range(number_of_training_weeks):
-                    weekly[i] = weekly["adjClose"].shift(i)
-                weekly["y"] = weekly["adjClose"].shift(-1)
-                weekly.dropna(inplace=True)
-                weekly["ticker"] = ticker
-                weekly_sets.append(weekly)
-            data = pd.concat(weekly_sets)
-            for i in range(number_of_training_weeks):
-                data.rename(columns={i:str(i)},inplace=True)
-            data["date"] = [datetime.strptime(f'{row[1]["year"]} {row[1]["week"]} 0', "%Y %W %w") for row in data.iterrows()]
-            for param in self.params:
-                data[param] = self.params[param]
-            self.db.connect()
-            self.db.store("transformed",data)
+            market.connect()
+            sp5 = market.retrieve("sp500")
+            weekly_gap = 1
+            number_of_training_weeks = self.params["number_of_training_weeks"]
+            weekly_sets = []
+            for ticker in tqdm(sp5["Symbol"].unique(),desc="speculation_transformations"):
+                try:
+                    ticker_data = market.retrieve_ticker_prices("prices",ticker)
+                    ticker_data = p.column_date_processing(ticker_data)
+                    ticker_data["quarter"] = [x.quarter for x in ticker_data["date"]]
+                    ticker_data["year"] = [x.year for x in ticker_data["date"]]
+                    ticker_data["week"] = [x.week for x in ticker_data["date"]]
+                    weekly = ticker_data.groupby(["year","quarter","week"]).mean().reset_index()
+                    for i in range(number_of_training_weeks):
+                        weekly[i] = weekly["adjclose"].shift(i)
+                    weekly["y"] = weekly["adjclose"].shift(-weekly_gap)
+                    weekly.dropna(inplace=True)
+                    weekly["ticker"] = ticker
+                    for i in range(number_of_training_weeks):
+                        weekly.rename(columns={i:str(i)},inplace=True)
+                    weekly["date"] = [datetime.strptime(f'{row[1]["year"]} {row[1]["week"]} 0', "%Y %W %w") for row in weekly.iterrows()]
+                    self.db.store("transformed",weekly)
+                    weekly_sets.append(weekly)
+                except Exception as e:
+                    print(ticker,str(e))
             self.db.disconnect()
+            market.disconnect()
+            data = pd.concat(weekly_sets)
             self.transformed = True
         return data
 
@@ -94,19 +83,21 @@ class Speculation(AnAIStrategy):
         else:
             start_year = self.start_date.year
             end_year = self.end_date.year
-            prices = self.subscriptions["market"]["tables"]["prices"].copy()
             self.db.connect()
             data = self.db.retrieve("transformed")
             self.db.disconnect()
-            for col in self.params.keys():
-                data.drop(col,axis=1,inplace=True)
-            categories = self.subscriptions["stock_category"]["tables"]["sim"]
+            stock_category = self.subscriptions["stock_category"]["db"]
+            stock_category.connect()
+            categories = stock_category.retrieve("sim")
+            stock_category.disconnect()
             category_training_year = self.params["category_training_year"]
             subset_categories = categories[categories["training_years"]==category_training_year]
             number_of_training_weeks = self.params["number_of_training_weeks"]
             model_training_year = self.params["model_training_year"]
-            self.db.connect()
             sims = []
+            market = self.subscriptions["market"]["db"]
+            market.connect()
+            self.db.connect()
             for year in range(start_year,end_year+1):
                 for quarter in range(1,5):
                     quarterly_categories = subset_categories[(subset_categories["year"]==year) & (subset_categories["quarter"]==quarter)]
@@ -115,7 +106,8 @@ class Speculation(AnAIStrategy):
                             category_tickers = quarterly_categories[quarterly_categories["prediction"]==category]["ticker"].unique()
                             model_data = data[(data["ticker"].isin(category_tickers))]
                             model_data.sort_values("date",ascending=True,inplace=True)
-                            first_index = model_data[(model_data["year"] == year - model_training_year - 1) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
+                            model_data.reset_index(inplace=True)
+                            first_index = model_data[(model_data["year"] == (year - model_training_year - 1)) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
                             last_index = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
                             training_data = model_data.iloc[first_index:last_index]
                             prediction_data = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)]
@@ -130,16 +122,24 @@ class Speculation(AnAIStrategy):
                             sim["weekly_price_regression_prediction"] = model["model"].predict(sim[[str(x) for x in range(number_of_training_weeks)]])
                             sim["score"] = model["score"].item()
                             sim = sim.groupby(["year","week","ticker"]).mean().reset_index()
-                            sim = prices[["date","year","week","ticker","adjClose"]].merge(sim[["year","week","ticker","weekly_price_regression_prediction","score"]],how="left",on=["year","week","ticker"])
-                            sim["delta"] = (sim["weekly_price_regression_prediction"] - sim["adjClose"]) / sim["adjClose"]
-                            sim = sim[["date","ticker","adjClose","delta","score"]].dropna()
+                            stuff = []
+                            for ticker in category_tickers:
+                                stuff.append(market.retrieve_ticker_prices("prices",ticker))
+                            prices = p.column_date_processing(pd.concat(stuff))
+                            prices["year"] = [x.year for x in prices["date"]]
+                            prices["week"] = [x.week for x in prices["date"]]
+                            sim = prices[["date","year","week","ticker","adjclose"]].merge(sim[["year","week","ticker","weekly_price_regression_prediction","score"]],how="left",on=["year","week","ticker"])
+                            sim["delta"] = (sim["weekly_price_regression_prediction"] - sim["adjclose"]) / sim["adjclose"]
+                            sim = sim[["date","ticker","adjclose","delta","score"]].dropna()
                             for param in self.params:
-                                sim[param]=self.params[param]
-                            self.db.store("sim",sim)
-                            sims.append(sim)
+                                sim[param]=self.params[param]                
+                            if sim.index.size > 1:
+                                self.db.store("sim",sim)
+                                sims.append(sim)
                         except Exception as e:
-                            print(year,quarter,str(e))
+                            print(category,str(e))
             self.db.disconnect()
+            market.disconnect()
             self.simmed = True
         return pd.concat(sims)
                
