@@ -4,15 +4,15 @@ from strategy.financialpredict import FinancialPredict
 from strategy.speculation import Speculation
 class StratFact(object):
     @classmethod
-    def create_strat(self,start,end,name,params):
+    def create_strat(self,start,end,name,modeling_params,trading_params):
         match name:
             case "rolling_percent":
-                return RollingPercent(start,end,params)
+                return RollingPercent(start,end,modeling_params,trading_params)
             case "progress_report":
-                return ProgressReport(start,end,params)
+                return ProgressReport(start,end,modeling_params,trading_params)
             case "financial_predict":
-                return FinancialPredict(start,end)
+                return FinancialPredict(start,end,modeling_params,trading_params)
             case "speculation":
-                return Speculation(start,end)
+                return Speculation(start,end,modeling_params,trading_params)
             case _:
                 return None

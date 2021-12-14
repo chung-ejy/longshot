@@ -8,13 +8,13 @@ from modeler.modeler import Modeler as m
 from processor.processor import Processor as p
 
 class Speculation(AnAIStrategy):
-    def __init__(self,start_date,end_date,params=
-                        {"timeframe":"weekly"
-                    ,"score_requirement":70
-                    ,"requirement":5
+    def __init__(self,start_date,end_date,modeling_params={
+                    "number_of_training_weeks":14
                     ,"category_training_year":4
                     ,"model_training_year":1
-                    ,"number_of_training_weeks":14
+                        },
+                    trading_params={"score_requirement":70
+                    ,"requirement":5
                     ,"value":True}):
         super().__init__("speculation",
                             start_date,
@@ -27,7 +27,7 @@ class Speculation(AnAIStrategy):
 
     @classmethod
     def required_params(self):
-        required =  {"timeframe":"weekly"
+        required =  {
                     ,"requirement":5
                     ,"score_requirement":70
                     ,"number_of_training_weeks":14
@@ -45,7 +45,7 @@ class Speculation(AnAIStrategy):
             market.connect()
             sp5 = market.retrieve("sp500")
             weekly_gap = 1
-            number_of_training_weeks = self.params["number_of_training_weeks"]
+            number_of_training_weeks = self.modeling_params["number_of_training_weeks"]
             weekly_sets = []
             for ticker in tqdm(sp5["Symbol"].unique(),desc="speculation_transformations"):
                 try:
@@ -75,7 +75,7 @@ class Speculation(AnAIStrategy):
 
     def create_sim(self):
         self.db.connect()
-        sim = self.db.retrieve_sim(self.params)
+        sim = self.db.retrieve_sim(self.modeling_params)
         self.db.disconnect()
         if sim.index.size > 1:
             self.simmed = True
@@ -90,10 +90,10 @@ class Speculation(AnAIStrategy):
             stock_category.connect()
             categories = stock_category.retrieve("sim")
             stock_category.disconnect()
-            category_training_year = self.params["category_training_year"]
+            category_training_year = self.modeling_params["category_training_year"]
             subset_categories = categories[categories["training_years"]==category_training_year]
-            number_of_training_weeks = self.params["number_of_training_weeks"]
-            model_training_year = self.params["model_training_year"]
+            number_of_training_weeks = self.modeling_params["number_of_training_weeks"]
+            model_training_year = self.modeling_params["model_training_year"]
             sims = []
             market = self.subscriptions["market"]["db"]
             market.connect()
@@ -131,8 +131,8 @@ class Speculation(AnAIStrategy):
                             sim = prices[["date","year","week","ticker","adjclose"]].merge(sim[["year","week","ticker","weekly_price_regression_prediction","score"]],how="left",on=["year","week","ticker"])
                             sim["delta"] = (sim["weekly_price_regression_prediction"] - sim["adjclose"]) / sim["adjclose"]
                             sim = sim[["date","ticker","adjclose","delta","score"]].dropna()
-                            for param in self.params:
-                                sim[param]=self.params[param]                
+                            for param in self.modeling_params:
+                                sim[param]=self.modeling_params[param]                
                             if sim.index.size > 1:
                                 self.db.store("sim",sim)
                                 sims.append(sim)
@@ -144,16 +144,12 @@ class Speculation(AnAIStrategy):
         return pd.concat(sims)
                
     def daily_recommendation(self,date,sim,seat):
-        if not self.params["value"]:
-            sim["delta"] = sim["delta"] * -1
-        while date.weekday() > 4:
-            date = date + timedelta(days=1)
         try:
             daily_rec = sim[(sim["date"]>=date) & 
-                        (sim["delta"] >= float(self.params["requirement"]/100))]
+                        (sim["delta"] >= float(self.trading_params["requirement"]/100))]
         except:
             daily_rec = sim[(sim["date"]>=date) & 
-                        (sim["delta"] >= float(self.params["requirement"]/100))]
+                        (sim["delta"] >= float(self.trading_params["requirement"]/100))]
         daily_rec = daily_rec[daily_rec["date"]==daily_rec["date"].min()].sort_values("delta",ascending=False)
         try:
             if daily_rec.index.size >= seat:
@@ -167,7 +163,7 @@ class Speculation(AnAIStrategy):
     
     def exit(self,sim,trade):
         bp = trade["adjClose"]
-        sp = trade["adjClose"] * float(1+(self.params["requirement"]/100.0))
+        sp = trade["adjClose"] * float(1+(self.trading_params["requirement"]/100.0))
         try:
             this_exit = sim[(sim["date"] > trade["date"]) & (sim["adjClose"]>=sp)
             & (sim["ticker"]==trade["ticker"])].sort_values("date").iloc[0]

@@ -78,7 +78,7 @@ class FinancialPredict(AnAIStrategy):
 
     def create_sim(self):
         self.db.connect()
-        sim = self.db.retrieve_sim(self.params)
+        sim = self.db.retrieve_sim(self.params["modeling"])
         self.db.disconnect()
         if sim.index.size > 1:
             self.simmed = True
@@ -184,16 +184,16 @@ class FinancialPredict(AnAIStrategy):
             return pd.concat(sims)
                
     def daily_recommendation(self,date,sim,seat):
-        if not self.params["value"]:
+        if not self.params["trading"]["value"]:
             sim["delta"] = sim["delta"] * -1
         while date.weekday() > 4:
             date = date + timedelta(days=1)
         try:
             daily_rec = sim[(sim["date"]>=date) & 
-                        (sim["delta"] >= float(self.params["requirement"]/100))]
+                        (sim["delta"] >= float(self.params["trading"]["requirement"]/100))]
         except:
             daily_rec = sim[(sim["date"]>=date) & 
-                        (sim["delta"] >= float(self.params["requirement"]/100))]
+                        (sim["delta"] >= float(self.params["trading"]["requirement"]/100))]
         daily_rec = daily_rec[daily_rec["date"]==daily_rec["date"].min()].sort_values("delta",ascending=False)
         try:
             if daily_rec.index.size >= seat:
@@ -207,7 +207,7 @@ class FinancialPredict(AnAIStrategy):
     
     def exit(self,sim,trade):
         bp = trade["adjclose"]
-        sp = trade["adjclose"] * float(1+(self.params["requirement"]/100.0))
+        sp = trade["adjclose"] * float(1+(self.params["trading"]["requirement"]/100.0))
         try:
             this_exit = sim[(sim["date"] > trade["date"]) & (sim["adjclose"]>=sp)
             & (sim["ticker"]==trade["ticker"])].sort_values("date").iloc[0]

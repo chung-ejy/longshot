@@ -7,14 +7,11 @@ from tqdm import tqdm
 from time import sleep
 pd.options.mode.chained_assignment = None
 class ProgressReport(AStrategy):
-    def __init__(self,start_date,end_date,params={"timeframe":"quarterly"
-                    ,"requirement":5}):
+    def __init__(self,start_date,end_date,modeling_params={},trading_params={"requirement":5}):
         super().__init__(f"progress_report",
                             start_date,
                             end_date,
-                        {"market":{}
-                            }
-                            ,params)
+                        {"market":{}},params)
     @classmethod
     def required_params(self):
         required = {"timeframe":"quarterly"
@@ -47,8 +44,8 @@ class ProgressReport(AStrategy):
                             ticker_data["quarter_start"] = sp
                             ticker_data["delta"] = (ticker_data["adjclose"] - sp) / sp
                             ticker_data = ticker_data[["date","adjclose","delta","ticker"]]
-                            for param in self.params:
-                                ticker_data[param]=self.params[param]
+                            for param in self.modeling_params:
+                                ticker_data[param]=self.modeling_params[param]
                             sim.append(ticker_data)
                             self.db.store("sim",ticker_data)
                         except Exception as e:
@@ -64,10 +61,10 @@ class ProgressReport(AStrategy):
             date = date + timedelta(days=1)
         try:
             daily_rec = sim[(sim["date"]>=date) & 
-                        (sim["delta"] >= float(self.params["requirement"]/100))]
+                        (sim["delta"] >= float(self.trading_params["requirement"]/100))]
         except:
             daily_rec = sim[(sim["date"]>=date) & 
-                        (sim["delta"] >= float(self.params["requirement"]/100))]
+                        (sim["delta"] >= float(self.trading_params["requirement"]/100))]
         daily_rec = daily_rec[daily_rec["date"]==daily_rec["date"].min()].sort_values("delta",ascending=False)
         try:
             if daily_rec.index.size >= seat:
@@ -81,7 +78,7 @@ class ProgressReport(AStrategy):
     
     def exit(self,sim,trade):
         bp = trade["adjclose"]
-        sp = trade["adjclose"] * float(1+(self.params["requirement"]/100.0))
+        sp = trade["adjclose"] * float(1+(self.trading_params["requirement"]/100.0))
         this_exit = sim[(sim["date"] > trade["date"]) & (sim["adjclose"]>=sp)
          & (sim["ticker"]==trade["ticker"])].sort_values("date").iloc[0]
         trade["sell_date"] = this_exit["date"]
