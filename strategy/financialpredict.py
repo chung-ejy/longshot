@@ -8,21 +8,13 @@ from modeler.modeler import Modeler as m
 from processor.processor import Processor as p
 import numpy as np
 class FinancialPredict(AnAIStrategy):
-    def __init__(self,start_date,end_date,params=
-                        {"modeling":{
-                            "score_requirement":70
-                            ,"categories":2
-                            ,"model_training_year":4},
-                    "trading": {
-                    "requirement":10
-                    ,"value":True }
-                    }):
+    def __init__(self,start_date,end_date,modeling_params={"score_requirement":70,"categories":2,"model_training_year":4},
+                    trading_params= {"requirement":10,"value":True}):
         super().__init__("financial_predict",
                             start_date,
                             end_date,
                         {"market":{},
-                        "stock_category":{}},
-                        params
+                        "stock_category":{}},modeling_params=modeling_params, trading_params=trading_params
                      )
         self.transformed = False
 
@@ -78,7 +70,7 @@ class FinancialPredict(AnAIStrategy):
 
     def create_sim(self):
         self.db.connect()
-        sim = self.db.retrieve_sim(self.params["modeling"])
+        sim = self.db.retrieve_sim(self.modeling_params)
         self.db.disconnect()
         if sim.index.size > 1:
             self.simmed = True
@@ -86,7 +78,7 @@ class FinancialPredict(AnAIStrategy):
         else:
             market = self.subscriptions["market"]["db"]
             product_db = self.subscriptions["stock_category"]["db"]
-            categories_nums = self.params["modeling"]["categories"]
+            categories_nums = self.modeling_params["categories"]
             market.connect()
             product_db.connect()
             financials = market.retrieve("unified_financials")
@@ -108,7 +100,7 @@ class FinancialPredict(AnAIStrategy):
             labels = initial_data.merge(categories,on=["year","quarter","ticker"],how="left")
             factors = financials.merge(categories,on=["year","quarter","ticker"],how="left")
             factors["date"] = [datetime(row[1]["year"], row[1]["quarter"] * 3 -  2, 1) for row in factors.iterrows()]
-            model_training_year = self.params["modeling"]["model_training_year"]
+            model_training_year = self.modeling_params["model_training_year"]
             start_year = self.start_date.year
             end_year = self.end_date.year
             sims = []
@@ -150,7 +142,7 @@ class FinancialPredict(AnAIStrategy):
                                 model = models.iloc[i]
                                 api = model["api"]
                                 score = model["score"]
-                                if score >= self.params["modeling"]["score_requirement"]/100:
+                                if score >= self.modeling_params["score_requirement"]/100:
                                     sim[f"{api}_prediction"] = model["model"].predict(sim[financial_factors])
                                     sim[f"{api}_score"] = model["score"].item()
                             stuff = []
@@ -169,12 +161,11 @@ class FinancialPredict(AnAIStrategy):
                             sim["prediction"] = [np.nanmean([row[1][x] for x in sim.columns if "prediction" in x and row[1][x] != 0]) for row in sim.iterrows()]
                             sim["score"] = [np.nanmean([row[1][x] for x in sim.columns if "score" in x and row[1][x] != 0]) for row in sim.iterrows()]
                             sim["delta"] = (sim["prediction"] - sim["adjclose"]) / sim["adjclose"]
-                            for param in self.params["modeling"]:
-                                sim[param]=self.params["modeling"][param]
+                            for param in self.modeling_params:
+                                sim[param]=self.modeling_params[param]
                             if sim.index.size > 1:
                                 self.db.store("sim",sim)
                                 sims.append(sim)
-                            sims.append(sim)
                         except Exception as e:
                             print(year,quarter,category,str(e)) 
                             continue
@@ -184,16 +175,13 @@ class FinancialPredict(AnAIStrategy):
             return pd.concat(sims)
                
     def daily_recommendation(self,date,sim,seat):
-        if not self.params["trading"]["value"]:
+        if not self.trading_params["value"]:
             sim["delta"] = sim["delta"] * -1
         while date.weekday() > 4:
             date = date + timedelta(days=1)
-        try:
-            daily_rec = sim[(sim["date"]>=date) & 
-                        (sim["delta"] >= float(self.params["trading"]["requirement"]/100))]
-        except:
-            daily_rec = sim[(sim["date"]>=date) & 
-                        (sim["delta"] >= float(self.params["trading"]["requirement"]/100))]
+        daily_rec = sim[(sim["date"]>=date) 
+                    & (sim["delta"] >= float(self.trading_params["requirement"]/100))
+                    & (sim["score"] >= float(self.trading_params["score_requirement"]/100))]
         daily_rec = daily_rec[daily_rec["date"]==daily_rec["date"].min()].sort_values("delta",ascending=False)
         try:
             if daily_rec.index.size >= seat:
@@ -207,14 +195,30 @@ class FinancialPredict(AnAIStrategy):
     
     def exit(self,sim,trade):
         bp = trade["adjclose"]
-        sp = trade["adjclose"] * float(1+(self.params["trading"]["requirement"]/100.0))
-        try:
-            this_exit = sim[(sim["date"] > trade["date"]) & (sim["adjclose"]>=sp)
-            & (sim["ticker"]==trade["ticker"])].sort_values("date").iloc[0]
-        except:
-            this_exit = sim[(sim["date"] > trade["date"]) & (sim["adjclose"]>=sp)
-            & (sim["ticker"]==trade["ticker"])].sort_values("date").iloc[0]
-        trade["sell_date"] = this_exit["date"]
-        trade["sell_price"] = sp
+        sp = trade["adjclose"] * float(1+(self.trading_params["requirement"]/100.0))
+        min_date = trade["date"] + timedelta(days=1)
+        exit_date  = trade["date"] + timedelta(days=30)
+        phase = "exiting"
+        tsim = sim[sim["ticker"]==trade["ticker"]].copy()
+        last_call_days = min((tsim["date"].max() - trade["date"]).days-1,30)
+        cover_date = trade["date"] + timedelta(days=last_call_days)
+        best_exits = tsim[(tsim["date"] >= min_date) & (tsim["date"] <= exit_date) & (tsim["adjclose"]>=sp)].sort_values("date").copy()
+        breakeven_exits = tsim[(tsim["date"] > exit_date) & (tsim["adjclose"] >= bp)].sort_values("date").copy()
+        rekt_exits = tsim[(tsim["date"] > exit_date)].sort_values("date",ascending=False).copy()
+        if best_exits.index.size < 1:
+            if breakeven_exits.index.size < 1:
+                if rekt_exits.index.size < 1:
+                    date = date + timedelta(days=1)
+                else:
+                    the_exit = rekt_exits.iloc[0]
+                    trade["sell_price"] = the_exit["adjclose"]
+            else:
+                the_exit = breakeven_exits.iloc[0]
+                trade["sell_price"] = bp
+        else:
+            the_exit = best_exits.iloc[0]
+            trade["sell_price"] = sp
+        trade["sell_date"] = the_exit["date"]
+        trade = {**trade,**self.trading_params}
         return trade
         

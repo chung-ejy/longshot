@@ -6,17 +6,18 @@ from database.dbfact import DBFact
 from tqdm import tqdm
 
 class AStrategy(IStrategy):
-    def __init__(self,name,start_date,end_date,subscriptions,params):
+    def __init__(self,name,start_date,end_date,subscriptions,modeling_params,trading_params):
         self.name = name
         self.start_date = start_date
         self.end_date = end_date
         self.subscriptions = subscriptions
-        self.params = params
+        self.modeling_params = modeling_params
+        self.trading_params = trading_params
         self.db = Strategy(name)
         self.subscribed = False
         self.loaded = False
         self.db.connect()
-        self.simmed = self.db.retrieve_sim(self.params).index.size > 0 
+        self.simmed = self.db.retrieve_sim(self.modeling_params).index.size > 0 
         self.db.disconnect()
         self.ai = False
         super().__init__()

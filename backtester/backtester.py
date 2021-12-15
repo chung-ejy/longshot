@@ -33,10 +33,12 @@ class Backtester(object):
                             date = date + timedelta(days=1)
                         else:
                             trade = strat.exit(sim,daily_rec)
-                            trade = {**trade,**params}
-                            trades.append(trade)
-                            blacklist.append(trade)
-                            date = trade["sell_date"] + timedelta(days=1)
+                            if trade["sell_date"] < trade["date"]:
+                                date = date + timedelta(days=1)
+                            else:
+                                trades.append(trade)
+                                blacklist.append(trade)
+                                date = trade["sell_date"] + timedelta(days=1)
                 except Exception as e:
                     print(str(e))
                     date = date + timedelta(days=1)

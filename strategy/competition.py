@@ -1,4 +1,5 @@
 import pandas as pd
+import database.competition as dbc
 from strategy.anaistrategy import AnAIStrategy
 from datetime import timedelta, datetime
 import pytz
@@ -7,10 +8,9 @@ pd.options.mode.chained_assignment = None
 from modeler.modeler import Modeler as m
 from processor.processor import Processor as p
 import numpy as np
-class Speculation(AnAIStrategy):
+class Competition(AnAIStrategy):
     def __init__(self,start_date,end_date,modeling_params={
-                    "number_of_training_weeks":14
-                    ,"categories":2
+                    "categories":2
                     ,"model_training_year":1
                     ,"score_requirement":70
                         },
@@ -18,13 +18,14 @@ class Speculation(AnAIStrategy):
                     "score_requirement":70
                     ,"requirement":5
                     ,"value":True}):
-        super().__init__("speculation",
+        super().__init__("competition",
                             start_date,
                             end_date,
                         {"market":{},
                         "stock_category":{}},modeling_params=modeling_params, trading_params=trading_params
                      )
         self.transformed = False
+        self.db = dbc.Competition("competition")
 
     @classmethod
     def required_params(self):
@@ -39,30 +40,45 @@ class Speculation(AnAIStrategy):
         self.db.connect()
         data = self.db.retrieve("transformed")
         market = self.subscriptions["market"]["db"]
+        stock_category = self.subscriptions["stock_category"]["db"]
         if self.transformed or data.index.size > 1:
             self.transformed = True
             return data
         else:
+            self.db.connect()
+            market = self.subscriptions["market"]["db"]
+            stock_category = self.subscriptions["stock_category"]["db"]
             market.connect()
+            stock_category.connect()
+            categories = stock_category.retrieve("sim")
             sp5 = market.retrieve("sp500")
             weekly_gap = 1
-            number_of_training_weeks = self.modeling_params["number_of_training_weeks"]
             weekly_sets = []
-            for ticker in tqdm(sp5["Symbol"].unique(),desc="speculation_transformations"):
+            for ticker in tqdm(sp5["Symbol"].unique(),desc="competition_transformations"):
                 try:
-                    ticker_data = market.retrieve_ticker_prices("prices",ticker)
-                    ticker_data = p.column_date_processing(ticker_data)
-                    ticker_data["quarter"] = [x.quarter for x in ticker_data["date"]]
-                    ticker_data["year"] = [x.year for x in ticker_data["date"]]
-                    ticker_data["week"] = [x.week for x in ticker_data["date"]]
-                    weekly = ticker_data.groupby(["year","quarter","week"]).mean().reset_index()
-                    for i in range(number_of_training_weeks):
-                        weekly[i] = weekly["adjclose"].shift(i)
-                    weekly["y"] = weekly["adjclose"].shift(-weekly_gap)
-                    weekly.dropna(inplace=True)
+                    num_cats = self.modeling_params["categories"]
+                    category = categories[categories["ticker"]==ticker][f"{num_cats}_classification"].iloc[0]
+                    cols = categories[categories[f"{num_cats}_classification"]==category]["ticker"].unique()
+                    stuff = []
+                    for t in cols:
+                        ticker_data = market.retrieve_ticker_prices("prices",t)
+                        ticker_data = p.column_date_processing(ticker_data)
+                        stuff.append(ticker_data)
+                    heh = pd.concat(stuff)
+                    lel = heh.pivot_table(index="date",columns="ticker",values="adjclose").reset_index()
+                    lel["year"] = [x.year for x in lel["date"]]
+                    lel["week"] = [x.week for x in lel["date"]]
+                    lel["quarter"] = [x.quarter for x in lel["date"]]
+                    weekly = lel.groupby(["year","quarter","week"]).mean().reset_index()
+                    weekly = weekly[weekly["year"] > 2010]
+                    weekly["y"] = weekly[ticker].shift(-weekly_gap)
+                    weekly = weekly[:-1]
+                    relevant = ["year","quarter","week","y"]
+                    for col in cols:
+                        if 0.0 not in list(weekly[col].fillna(0)):
+                            relevant.append(col)
+                    weekly = weekly[relevant]
                     weekly["ticker"] = ticker
-                    for i in range(number_of_training_weeks):
-                        weekly.rename(columns={i:str(i)},inplace=True)
                     weekly["date"] = [datetime.strptime(f'{row[1]["year"]} {row[1]["week"]} 0', "%Y %W %w") for row in weekly.iterrows()]
                     self.db.store("transformed",weekly)
                     weekly_sets.append(weekly)
@@ -98,7 +114,7 @@ class Speculation(AnAIStrategy):
             market = self.subscriptions["market"]["db"]
             market.connect()
             self.db.connect()
-            for year in tqdm(range(start_year,end_year+1),desc="speculation_sim_year"):
+            for year in tqdm(range(start_year,end_year+1),desc="competition_sim_year"):
                 for quarter in range(1,5):
                     quarterly_categories = categories[(categories["year"]==year) & (categories["quarter"]==quarter)]
                     for category in list(quarterly_categories[f"{categories_nums}_classification"].unique()):
@@ -158,7 +174,11 @@ class Speculation(AnAIStrategy):
         return pd.concat(sims)
                
     def daily_recommendation(self,date,sim,seat):
-        daily_rec = sim[(sim["date"]>=date) & 
+        try:
+            daily_rec = sim[(sim["date"]>=date) & 
+                        (sim["delta"] >= float(self.trading_params["requirement"]/100))]
+        except:
+            daily_rec = sim[(sim["date"]>=date) & 
                         (sim["delta"] >= float(self.trading_params["requirement"]/100))]
         daily_rec = daily_rec[daily_rec["date"]==daily_rec["date"].min()].sort_values("delta",ascending=False)
         try:
@@ -173,31 +193,20 @@ class Speculation(AnAIStrategy):
     
     def exit(self,sim,trade):
         bp = trade["adjclose"]
-        sp = trade["adjclose"] * float(1+(self.trading_params["requirement"]/100.0))
-        min_date = trade["date"] + timedelta(days=1)
-        exit_date  = trade["date"] + timedelta(days=30)
+        sp = trade["adjclose"] * float(1+(rp.trading_params["requirement"]/100.0))
         phase = "exiting"
-        tsim = sim[sim["ticker"]==trade["ticker"]].copy()
-        last_call_days = min((tsim["date"].max() - trade["date"]).days-1,45)
-        cover_date = trade["date"] + timedelta(days=last_call_days)
-        best_exits = tsim[(tsim["date"] >= min_date) & (tsim["date"] <= exit_date) & (tsim["adjclose"]>=sp)].sort_values("date").copy()
-        breakeven_exits = tsim[(tsim["date"] > exit_date) & (tsim["adjclose"] >= bp)].sort_values("date").copy()
-        rekt_exits = tsim[(tsim["date"] > exit_date)].sort_values("date",ascending=False).copy()
-        if best_exits.index.size < 1:
-            if breakeven_exits.index.size < 1:
-                if rekt_exits.index.size < 1:
-                    date = date + timedelta(days=1)
-                else:
-                    the_exit = rekt_exits.iloc[0]
-                    trade["sell_price"] = the_exit["adjclose"]
+        exits = sim[(sim["date"] > trade["date"]) & (sim["adjclose"]>=sp)
+            & (sim["ticker"]==trade["ticker"])].sort_values("date")
+        if exits.index.size < 1:
+            exits = sim[(sim["date"] > trade["date"]) & (sim["ticker"]==trade["ticker"])].sort_values("date",ascending=False)
+            if exits.index.size < 1:
+                date = date + timedelta(days=1)
             else:
-                the_exit = breakeven_exits.iloc[0]
-                trade["sell_price"] = bp
+                the_exit = exits.iloc[0]
         else:
-            the_exit = best_exits.iloc[0]
-            trade["sell_price"] = sp
+            the_exit = exits.iloc[0]
         trade["sell_date"] = the_exit["date"]
         trade["sell_price"] = sp
-        trade = {**trade,**self.trading_params}
+        trade = {**trade,**rp.trading_params}
         return trade
         

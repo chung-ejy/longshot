@@ -11,7 +11,7 @@ class Processor(object):
             data.rename(columns={col:new_cols[col]},inplace=True)
         if "date" in list(data.columns):
             try:
-                data["date"] = pd.to_datetime(data["Date"])
+                data["date"] = pd.to_datetime(data["Date"]).dt.tz_localize(None)
             except:
-                data["date"] = pd.to_datetime(data["date"])
+                data["date"] = pd.to_datetime(data["date"]).dt.tz_localize(None)
         return data

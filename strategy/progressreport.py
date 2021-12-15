@@ -7,11 +7,11 @@ from tqdm import tqdm
 from time import sleep
 pd.options.mode.chained_assignment = None
 class ProgressReport(AStrategy):
-    def __init__(self,start_date,end_date,modeling_params={},trading_params={"requirement":5}):
+    def __init__(self,start_date,end_date,modeling_params={},trading_params={"value":True,"requirement":5}):
         super().__init__(f"progress_report",
                             start_date,
                             end_date,
-                        {"market":{}},params)
+                        {"market":{}},modeling_params=modeling_params,trading_params=trading_params)
     @classmethod
     def required_params(self):
         required = {"timeframe":"quarterly"
@@ -79,9 +79,28 @@ class ProgressReport(AStrategy):
     def exit(self,sim,trade):
         bp = trade["adjclose"]
         sp = trade["adjclose"] * float(1+(self.trading_params["requirement"]/100.0))
-        this_exit = sim[(sim["date"] > trade["date"]) & (sim["adjclose"]>=sp)
-         & (sim["ticker"]==trade["ticker"])].sort_values("date").iloc[0]
-        trade["sell_date"] = this_exit["date"]
-        trade["sell_price"] = sp
+        min_date = trade["date"] + timedelta(days=1)
+        exit_date  = trade["date"] + timedelta(days=30)
+        phase = "exiting"
+        tsim = sim[sim["ticker"]==trade["ticker"]].copy()
+        last_call_days = min((tsim["date"].max() - trade["date"]).days-1,30)
+        cover_date = trade["date"] + timedelta(days=last_call_days)
+        best_exits = tsim[(tsim["date"] >= min_date) & (tsim["date"] <= exit_date) & (tsim["adjclose"]>=sp)].sort_values("date").copy()
+        breakeven_exits = tsim[(tsim["date"] > exit_date) & (tsim["adjclose"] >= bp)].sort_values("date").copy()
+        rekt_exits = tsim[(tsim["date"] > exit_date)].sort_values("date",ascending=False).copy()
+        if best_exits.index.size < 1:
+            if breakeven_exits.index.size < 1:
+                if rekt_exits.index.size < 1:
+                    date = date + timedelta(days=1)
+                else:
+                    the_exit = rekt_exits.iloc[0]
+                    trade["sell_price"] = the_exit["adjclose"]
+            else:
+                the_exit = breakeven_exits.iloc[0]
+                trade["sell_price"] = bp
+        else:
+            the_exit = best_exits.iloc[0]
+            trade["sell_price"] = sp
+        trade["sell_date"] = the_exit["date"]
+        trade = {**trade,**self.trading_params}
         return trade
-        

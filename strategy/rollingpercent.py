@@ -11,8 +11,7 @@ class RollingPercent(AStrategy):
         super().__init__(f"rolling_percent",
                             start_date,
                             end_date,
-                        {"market":{}},
-                        params
+                        {"market":{}},modeling_params=modeling_params, trading_params=trading_params
                      )
     @classmethod
     def required_params(self):
@@ -59,16 +58,10 @@ class RollingPercent(AStrategy):
         return sim
                
     def daily_recommendation(self,date,sim,seat):
-        try:
-            daily_rec = sim[(sim["date"]>=date) & 
-                        (sim["delta"] >= float(self.trading_params["requirement"]/100))]
-        except:
-            daily_rec = sim[(sim["date"]>=date.astimezone(pytz.utc)) & 
-                        (sim["delta"] >= float(self.trading_params["requirement"]/100))]
-        daily_rec = daily_rec[daily_rec["date"]==daily_rec["date"].min()].sort_values("delta",ascending=False)
+        daily_rec = sim[(sim["date"]==date) & (sim["delta"] >= float(self.trading_params["requirement"]/100))].sort_values("delta",ascending=False)
         try:
             if daily_rec.index.size >= seat:
-                result = daily_rec[["date","adjclose","ticker"]].iloc[seat].to_dict()
+                result = daily_rec[["date","adjclose","ticker","projected_delta"]].iloc[seat].to_dict()
                 result["seat"] = seat
                 return result
             else:
@@ -79,13 +72,29 @@ class RollingPercent(AStrategy):
     def exit(self,sim,trade):
         bp = trade["adjclose"]
         sp = trade["adjclose"] * float(1+(self.trading_params["requirement"]/100.0))
-        try:
-            this_exit = sim[(sim["date"] > trade["date"]) & (sim["adjclose"]>=sp)
-            & (sim["ticker"]==trade["ticker"])].sort_values("date").iloc[0]
-        except:
-            this_exit = sim[(sim["date"] > trade["date"].astimezone(pytz.utc)) & (sim["adjclose"]>=sp)
-            & (sim["ticker"]==trade["ticker"])].sort_values("date").iloc[0]
-        trade["sell_date"] = this_exit["date"]
-        trade["sell_price"] = sp
+        min_date = trade["date"] + timedelta(days=1)
+        exit_date  = trade["date"] + timedelta(days=7)
+        phase = "exiting"
+        tsim = sim[sim["ticker"]==trade["ticker"]].copy()
+        last_call_days = min((tsim["date"].max() - trade["date"]).days-1,14)
+        cover_date = trade["date"] + timedelta(days=last_call_days)
+        best_exits = tsim[(tsim["date"] >= min_date) & (tsim["date"] <= exit_date) & (tsim["adjclose"]>=sp)].sort_values("date").copy()
+        breakeven_exits = tsim[(tsim["date"] > exit_date) & (tsim["adjclose"] >= bp)].sort_values("date").copy()
+        rekt_exits = tsim[(tsim["date"] > exit_date)].sort_values("date",ascending=False).copy()
+        if best_exits.index.size < 1:
+            if breakeven_exits.index.size < 1:
+                if rekt_exits.index.size < 1:
+                    date = date + timedelta(days=1)
+                else:
+                    the_exit = rekt_exits.iloc[0]
+                    trade["sell_price"] = the_exit["adjclose"]
+            else:
+                the_exit = breakeven_exits.iloc[0]
+                trade["sell_price"] = bp
+        else:
+            the_exit = best_exits.iloc[0]
+            trade["sell_price"] = sp
+        trade["sell_date"] = the_exit["date"]
+        trade = {**trade,**self.trading_params}
         return trade
         
