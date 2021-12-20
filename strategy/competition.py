@@ -26,6 +26,8 @@ class Competition(AnAIStrategy):
                      )
         self.transformed = False
         self.db = dbc.Competition("competition")
+        self.exit_days = 45
+        self.last_call_day = 90
 
     @classmethod
     def required_params(self):
@@ -100,59 +102,47 @@ class Competition(AnAIStrategy):
         else:
             start_year = self.start_date.year
             end_year = self.end_date.year
-            self.db.connect()
-            data = self.db.retrieve("transformed")
-            self.db.disconnect()
-            stock_category = self.subscriptions["stock_category"]["db"]
-            stock_category.connect()
-            categories = stock_category.retrieve("sim")
-            stock_category.disconnect()
-            number_of_training_weeks = self.modeling_params["number_of_training_weeks"]
-            model_training_year = self.modeling_params["model_training_year"]
             categories_nums = self.modeling_params["categories"]
+            model_training_year = self.modeling_params["model_training_year"]
             sims = []
             market = self.subscriptions["market"]["db"]
             market.connect()
+            sp5 = market.retrieve("sp500")
             self.db.connect()
             for year in tqdm(range(start_year,end_year+1),desc="competition_sim_year"):
-                for quarter in range(1,5):
-                    quarterly_categories = categories[(categories["year"]==year) & (categories["quarter"]==quarter)]
-                    for category in list(quarterly_categories[f"{categories_nums}_classification"].unique()):
+                for quarter in tqdm(range(1,5),desc="competition_sim_quarter"):
+                    for ticker in tqdm(list(sp5["Symbol"].unique()),desc="competition_sim_ticker"):
                         try:
-                            category_tickers = quarterly_categories[quarterly_categories[f"{categories_nums}_classification"]==category]["ticker"].unique()
-                            model_data = data[(data["ticker"].isin(category_tickers))]
+                            model_data = self.db.retrieve_transformed(ticker)
                             model_data.sort_values("date",ascending=True,inplace=True)
-                            model_data.reset_index(inplace=True)
+                            model_data.reset_index(inplace=True,drop=True)
                             first_index = model_data[(model_data["year"] == (year - model_training_year - 1)) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
                             last_index = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
-                            training_data = model_data.iloc[first_index:last_index].reset_index()
-                            prediction_data = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].reset_index()
-                            # print(year,quarter,category,len(category_tickers),training_data.index.size,prediction_data.index.size)
-                            X = training_data[[str(x) for x in range(number_of_training_weeks)]]
+                            training_data = model_data.iloc[first_index:last_index].reset_index(drop=True).fillna(method="ffill")
+                            prediction_data = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].reset_index().fillna(method="ffill")
+                            # print(year,quarter,ticker,training_data.index.size,prediction_data.index.size)
+                            factor_cols = [x for x in training_data.columns if x not in ["year","quarter","week","y","ticker","date"]]
+                            X = training_data[factor_cols]
                             y = training_data["y"]
                             models = m.regression({"X":X,"y":y})
                             models["year"] = year
                             models["quarter"] = quarter
-                            models["category"] = category
                             sim = prediction_data
                             for i in range(models.index.size):
                                 model = models.iloc[i]
                                 api = model["api"]
                                 score = model["score"]
                                 if score >= self.modeling_params["score_requirement"]/100:
-                                    sim[f"{api}_prediction"] = model["model"].predict(sim[[str(x) for x in range(number_of_training_weeks)]])
+                                    sim[f"{api}_prediction"] = model["model"].predict(sim[factor_cols])
                                     sim[f"{api}_score"] = model["score"].item()
-                            stuff = []
-                            for ticker in category_tickers:
-                                ticker_data = market.retrieve_ticker_prices("prices",ticker)
-                                stuff.append(ticker_data)
-                            prices = p.column_date_processing(pd.concat(stuff))
+                            ticker_data = market.retrieve_ticker_prices("prices",ticker)
+                            prices = p.column_date_processing(ticker_data)
                             prices["year"] = [x.year for x in prices["date"]]
                             prices["week"] = [x.week for x in prices["date"]]
                             sim = p.column_date_processing(sim)
                             sim["year"] = [x.year for x in sim["date"]]
                             sim["week"] = [x.week for x in sim["date"]]
-                            sim = prices[["date","year","week","ticker","adjclose"]].merge(sim.drop(["date","adjclose"],axis=1),on=["year","week","ticker"],how="right").dropna()
+                            sim = prices[["date","year","week","ticker","adjclose"]].merge(sim.drop("date",axis=1),on=["year","week","ticker"],how="right").dropna()
                             sim["categories"] = categories_nums
                             final_cols = ["date","ticker","adjclose","categories"]
                             final_cols.extend([x for x in list(sim.columns) if "prediction" in x or "score" in x])
@@ -167,46 +157,8 @@ class Competition(AnAIStrategy):
                                 self.db.store("sim",sim)
                                 sims.append(sim)
                         except Exception as e:
-                            print(category,str(e))
+                            print(ticker,str(e))
             self.db.disconnect()
             market.disconnect()
             self.simmed = True
         return pd.concat(sims)
-               
-    def daily_recommendation(self,date,sim,seat):
-        try:
-            daily_rec = sim[(sim["date"]>=date) & 
-                        (sim["delta"] >= float(self.trading_params["requirement"]/100))]
-        except:
-            daily_rec = sim[(sim["date"]>=date) & 
-                        (sim["delta"] >= float(self.trading_params["requirement"]/100))]
-        daily_rec = daily_rec[daily_rec["date"]==daily_rec["date"].min()].sort_values("delta",ascending=False)
-        try:
-            if daily_rec.index.size >= seat:
-                result = daily_rec[["date","adjclose","ticker"]].iloc[seat].to_dict()
-                result["seat"] = seat
-                return result
-            else:
-                return {"error":"no trade","date":date}
-        except Exception as e:
-            return {"error":str(e)}
-    
-    def exit(self,sim,trade):
-        bp = trade["adjclose"]
-        sp = trade["adjclose"] * float(1+(rp.trading_params["requirement"]/100.0))
-        phase = "exiting"
-        exits = sim[(sim["date"] > trade["date"]) & (sim["adjclose"]>=sp)
-            & (sim["ticker"]==trade["ticker"])].sort_values("date")
-        if exits.index.size < 1:
-            exits = sim[(sim["date"] > trade["date"]) & (sim["ticker"]==trade["ticker"])].sort_values("date",ascending=False)
-            if exits.index.size < 1:
-                date = date + timedelta(days=1)
-            else:
-                the_exit = exits.iloc[0]
-        else:
-            the_exit = exits.iloc[0]
-        trade["sell_date"] = the_exit["date"]
-        trade["sell_price"] = sp
-        trade = {**trade,**rp.trading_params}
-        return trade
-        

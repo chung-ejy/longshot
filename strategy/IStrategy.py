@@ -18,11 +18,3 @@ class IStrategy(metaclass=ABCMeta):
     @abstractmethod
     def create_sim(self):
         raise NotImplementedError("must define create_sim")
-
-    @abstractmethod
-    def daily_recommendation(self):
-        raise NotImplementedError("must define daily_recommendation")
-    
-    @abstractmethod
-    def exit(self):
-        raise NotImplementedError("must define exit")
