@@ -9,17 +9,7 @@ from datetime import datetime, timedelta, timezone
 from backtester.backtester import Backtester
 from tqdm import tqdm
 class EquityPortfolio(APortfolio):
-    def __init__(self,start,end,name,weighting="equal",seats=5,strats={
-                    "rolling_percent":{"params":{"timeframe":"daily"
-                                                ,"requirement":5
-                                                ,"days":7
-                                                ,"value":True
-                                                ,"currency":"prices"}
-                                        },
-                    "progress_report":{"params":{"timeframe":"quarterly"
-                                                ,"requirement":5}
-                                    }
-                    }):
+    def __init__(self,start,end,name,weighting="equal",seats=10,strats={}):
         self.start = start
         self.end = end
         self.strats = strats
@@ -40,8 +30,9 @@ class EquityPortfolio(APortfolio):
     
     def load(self):
         for strat in tqdm(self.strats):
-            strat_params = self.strats[strat]["params"]
-            strat_class = StratFact.create_strat(self.start,self.end,strat,strat_params)
+            modeling_params = self.strats[strat]["modeling_params"]
+            trading_params = self.strats[strat]["trading_params"]
+            strat_class = StratFact.create_strat(self.start,self.end,strat,modeling_params,trading_params)
             strat_class.subscribe()
             self.strats[strat]["class"] = strat_class
         
@@ -71,7 +62,6 @@ class EquityPortfolio(APortfolio):
                     strat_class = self.strats[strat]["class"]
                     t = Backtester.equity_timeseries_backtest(self.start,self.end,self.seats,strat_class)
                     t["strategy"] = strat
-                    t.rename(columns={"adjClose":"adjclose"},errors="ignore",inplace=True)
                     t["delta"] = (t["sell_price"] - t["adjclose"]) / t["adjclose"]
                     self.db.connect()
                     self.db.store("trades",t)

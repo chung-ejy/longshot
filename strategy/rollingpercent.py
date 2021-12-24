@@ -89,7 +89,7 @@ class RollingPercent(AStrategy):
                 prices.sort_values("date",inplace=True)
                 prices[f'rolling_{days}'] = prices["adjclose"].rolling(window=days).mean()
                 prices = prices[(prices["year"] >= year - 1)].dropna()
-                prices["delta"] = (prices[f"rolling_{days}"] - prices["adjclose"]) / prices[f"rolling_{days}"]
+                prices["delta"] = (prices[f"rolling_{days}"] - prices["adjclose"]) / prices["adjclose"]
                 prices = prices[["date","adjclose","delta","ticker",f"rolling_{days}"]]
                 for param in self.modeling_params:
                     prices[param]=self.modeling_params[param]

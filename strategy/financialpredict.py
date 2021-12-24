@@ -17,8 +17,8 @@ class FinancialPredict(AnAIStrategy):
                         "stock_category":{}},modeling_params=modeling_params, trading_params=trading_params
                      )
         self.transformed = False
-        self.exit_days = 90
-        self.last_call_day = 365
+        self.exit_days = 45
+        self.last_call_day = 90
 
     @classmethod
     def required_params(self):
@@ -34,7 +34,7 @@ class FinancialPredict(AnAIStrategy):
 
     def initial_transform(self):
         self.db.connect()
-        data = self.db.retrieve("transformed")
+        data = self.db.query("transformed",{})
         self.db.disconnect()
         if self.transformed or data.index.size > 1:
             self.transformed = True
@@ -131,7 +131,6 @@ class FinancialPredict(AnAIStrategy):
                             prediction_data = training_factors[(training_factors["year"]==year) & (training_factors["quarter"]==quarter)]
                             relevant = relevant_factors.merge(relevant_labels,on=["year","quarter","ticker"],how="left").dropna()
                             relevant.reset_index(inplace=True)
-                            print(year,quarter,category,len(category_tickers),relevant.index.size,prediction_data.index.size)
                             X = relevant[financial_factors]
                             y = relevant["adjclose"]
                             models = m.regression({"X":X,"y":y})

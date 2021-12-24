@@ -26,8 +26,8 @@ class Competition(AnAIStrategy):
                      )
         self.transformed = False
         self.db = dbc.Competition("competition")
-        self.exit_days = 45
-        self.last_call_day = 90
+        self.exit_days = 14
+        self.last_call_day = 28
 
     @classmethod
     def required_params(self):
@@ -40,13 +40,14 @@ class Competition(AnAIStrategy):
 
     def initial_transform(self):
         self.db.connect()
-        data = self.db.retrieve("transformed")
+        data = self.db.transform_check({"categories":self.modeling_params["categories"]})
         market = self.subscriptions["market"]["db"]
         stock_category = self.subscriptions["stock_category"]["db"]
         if self.transformed or data.index.size > 1:
             self.transformed = True
             return data
         else:
+            phase = "initial loads"
             self.db.connect()
             market = self.subscriptions["market"]["db"]
             stock_category = self.subscriptions["stock_category"]["db"]
@@ -56,12 +57,13 @@ class Competition(AnAIStrategy):
             sp5 = market.retrieve("sp500")
             weekly_gap = 1
             weekly_sets = []
-            for ticker in tqdm(sp5["Symbol"].unique(),desc="competition_transformations"):
+            num_cats = self.modeling_params["categories"]
+            categories = categories[categories["year"] >= self.start_date.year - self.modeling_params["model_training_year"]]
+            for category in tqdm(categories[f"{num_cats}_classification"].unique()):
                 try:
-                    num_cats = self.modeling_params["categories"]
-                    category = categories[categories["ticker"]==ticker][f"{num_cats}_classification"].iloc[0]
                     cols = categories[categories[f"{num_cats}_classification"]==category]["ticker"].unique()
                     stuff = []
+                    phase = "first concat"
                     for t in cols:
                         ticker_data = market.retrieve_ticker_prices("prices",t)
                         ticker_data = p.column_date_processing(ticker_data)
@@ -72,20 +74,24 @@ class Competition(AnAIStrategy):
                     lel["week"] = [x.week for x in lel["date"]]
                     lel["quarter"] = [x.quarter for x in lel["date"]]
                     weekly = lel.groupby(["year","quarter","week"]).mean().reset_index()
-                    weekly = weekly[weekly["year"] > 2010]
-                    weekly["y"] = weekly[ticker].shift(-weekly_gap)
-                    weekly = weekly[:-1]
-                    relevant = ["year","quarter","week","y"]
-                    for col in cols:
-                        if 0.0 not in list(weekly[col].fillna(0)):
-                            relevant.append(col)
-                    weekly = weekly[relevant]
-                    weekly["ticker"] = ticker
-                    weekly["date"] = [datetime.strptime(f'{row[1]["year"]} {row[1]["week"]} 0', "%Y %W %w") for row in weekly.iterrows()]
-                    self.db.store("transformed",weekly)
-                    weekly_sets.append(weekly)
+                    weekly = weekly[weekly["year"] >= self.start_date.year - self.modeling_params["model_training_year"]]
+                    for ticker in cols:
+                        ticker_weekly = weekly.copy()
+                        ticker_weekly["y"] = ticker_weekly[ticker].shift(-weekly_gap)
+                        ticker_weekly = ticker_weekly[:-1].copy()
+                        relevant = ["year","quarter","week","y"]
+                        phase = "finding relevant columns"
+                        for col in cols:
+                            if 0.0 not in list(ticker_weekly[col].fillna(0)):
+                                relevant.append(col)
+                        ticker_weekly = ticker_weekly[relevant]
+                        ticker_weekly["ticker"] = ticker
+                        ticker_weekly["date"] = [datetime.strptime(f'{row[1]["year"]} {row[1]["week"]} 0', "%Y %W %w") for row in ticker_weekly.iterrows()]
+                        ticker_weekly["categories"] = num_cats
+                        self.db.store("transformed",ticker_weekly)
+                        weekly_sets.append(ticker_weekly)
                 except Exception as e:
-                    print(ticker,str(e))
+                    print(phase,category,str(e))
             self.db.disconnect()
             market.disconnect()
             data = pd.concat(weekly_sets)
@@ -109,7 +115,7 @@ class Competition(AnAIStrategy):
             market.connect()
             sp5 = market.retrieve("sp500")
             self.db.connect()
-            for year in tqdm(range(start_year,end_year+1),desc="competition_sim_year"):
+            for year in tqdm(range(start_year,end_year),desc="competition_sim_year"):
                 for quarter in tqdm(range(1,5),desc="competition_sim_quarter"):
                     for ticker in tqdm(list(sp5["Symbol"].unique()),desc="competition_sim_ticker"):
                         try:
@@ -118,11 +124,11 @@ class Competition(AnAIStrategy):
                             model_data.reset_index(inplace=True,drop=True)
                             first_index = model_data[(model_data["year"] == (year - model_training_year - 1)) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
                             last_index = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
-                            training_data = model_data.iloc[first_index:last_index].reset_index(drop=True).fillna(method="ffill")
-                            prediction_data = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].reset_index().fillna(method="ffill")
-                            # print(year,quarter,ticker,training_data.index.size,prediction_data.index.size)
+                            training_data = model_data.iloc[first_index:last_index].dropna().reset_index(drop=True)
+                            prediction_data = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].dropna().reset_index()
                             factor_cols = [x for x in training_data.columns if x not in ["year","quarter","week","y","ticker","date"]]
-                            X = training_data[factor_cols]
+                            factors = [x for x in factor_cols if True not in training_data[col].isna()]
+                            X = training_data[factors]
                             y = training_data["y"]
                             models = m.regression({"X":X,"y":y})
                             models["year"] = year
@@ -133,7 +139,7 @@ class Competition(AnAIStrategy):
                                 api = model["api"]
                                 score = model["score"]
                                 if score >= self.modeling_params["score_requirement"]/100:
-                                    sim[f"{api}_prediction"] = model["model"].predict(sim[factor_cols])
+                                    sim[f"{api}_prediction"] = model["model"].predict(sim[factors])
                                     sim[f"{api}_score"] = model["score"].item()
                             ticker_data = market.retrieve_ticker_prices("prices",ticker)
                             prices = p.column_date_processing(ticker_data)

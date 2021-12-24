@@ -40,15 +40,14 @@ class ADatabase(IDatabase):
             return pd.DataFrame(list(data))
         except Exception as e:
             print(self.name,table_name,str(e))
-
-    # async def retrieve_helper(self,table_name):
-    #     try:
-    #         db = await self.client[self.name]
-    #         table = await db[table_name]
-    #         data = await table.find({},{"_id":0},show_record_id=False)
-    #         return pd.DataFrame(list(data))
-    #     except Exception as e:
-    #         print(self.name,table_name,str(e))
+    
+    def update(self,table_name,query,update):
+        try:
+            db = self.client[self.name]
+            table = db[table_name]
+            data = table.find_one_and_update(query,{"$set":query})
+        except Exception as e:
+            print(self.name,table_name,str(e))
 
     def delete(self,table_name,query):
         try:

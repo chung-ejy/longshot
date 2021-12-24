@@ -41,7 +41,7 @@ class Modeler(object):
         results.extend(sk_result)
         xgb_result = self.xgb_regression(data)
         results.append(xgb_result)
-        results.append(self.light_regression(data))
+        # results.append(self.light_regression(data))
         results.append(self.cat_regression(data))
         df = pd.DataFrame(results)
         df["model_type"] = "regression"
@@ -65,10 +65,15 @@ class Modeler(object):
     @classmethod
     def light_regression(self,data):
         try:
-            params = {"boosting_type":["gbdt","goss","dart","rf"]
+            params = {"boosting_type":[
+                                        "gbdt"
+                                        ,"goss"
+                                        ,"dart"
+                                        ,"rf"
+                                    ]
                         }
             X_train, X_test, y_train, y_test = self.shuffle_split(data)
-            gs = GridSearchCV(LGBMRegressor(early_stopping_round=10,verbosity = -1,force_col_wise=True),param_grid=params,scoring="r2")
+            gs = GridSearchCV(LGBMRegressor(metric="mape",num_iterations=100,early_stopping_round=3,verbosity = -1,force_col_wise=True),param_grid=params,scoring="r2")
             gs.fit(X_train,y_train)
             predictions = gs.predict(X_test)
             score = r2_score(predictions,y_test)
@@ -81,9 +86,12 @@ class Modeler(object):
     @classmethod
     def cat_regression(self,data):
         try:
-            params = {"boosting_type":["Ordered","Plain"]}
+            params = {"boosting_type":[
+                                        "Ordered",
+                                        "Plain"
+                                        ]}
             X_train, X_test, y_train, y_test = self.shuffle_split(data)
-            gs = GridSearchCV(CatBoostRegressor(verbose=False,early_stopping_rounds=10),param_grid=params,scoring="r2")
+            gs = GridSearchCV(CatBoostRegressor(iterations=100,verbose=False,early_stopping_rounds=3),param_grid=params,scoring="r2")
             gs.fit(X_train,y_train)
             predictions = gs.predict(X_test)
             score = r2_score(predictions,y_test)

@@ -25,8 +25,8 @@ class Speculation(AnAIStrategy):
                         "stock_category":{}},modeling_params=modeling_params, trading_params=trading_params
                      )
         self.transformed = False
-        self.exit_days = 45
-        self.last_call_day = 90
+        self.exit_days = 14
+        self.last_call_day = 28
 
     @classmethod
     def required_params(self):
@@ -39,7 +39,7 @@ class Speculation(AnAIStrategy):
 
     def initial_transform(self):
         self.db.connect()
-        data = self.db.retrieve("transformed")
+        data = self.db.query("transformed",{"number_of_training_weeks":self.modeling_params["number_of_training_weeks"]})
         market = self.subscriptions["market"]["db"]
         if self.transformed or data.index.size > 1:
             self.transformed = True
@@ -66,6 +66,7 @@ class Speculation(AnAIStrategy):
                     for i in range(number_of_training_weeks):
                         weekly.rename(columns={i:str(i)},inplace=True)
                     weekly["date"] = [datetime.strptime(f'{row[1]["year"]} {row[1]["week"]} 0', "%Y %W %w") for row in weekly.iterrows()]
+                    weekly["number_of_training_weeks"] = number_of_training_weeks
                     self.db.store("transformed",weekly)
                     weekly_sets.append(weekly)
                 except Exception as e:
@@ -87,7 +88,7 @@ class Speculation(AnAIStrategy):
             start_year = self.start_date.year
             end_year = self.end_date.year
             self.db.connect()
-            data = self.db.retrieve("transformed")
+            data = self.db.query("transformed",{"number_of_training_weeks" :self.modeling_params["number_of_training_weeks"]})
             self.db.disconnect()
             stock_category = self.subscriptions["stock_category"]["db"]
             stock_category.connect()
@@ -105,15 +106,16 @@ class Speculation(AnAIStrategy):
                     quarterly_categories = categories[(categories["year"]==year) & (categories["quarter"]==quarter)]
                     for category in list(quarterly_categories[f"{categories_nums}_classification"].unique()):
                         try:
-                            category_tickers = quarterly_categories[quarterly_categories[f"{categories_nums}_classification"]==category]["ticker"].unique()
+                            phase = "start"
+                            category_tickers = quarterly_categories[quarterly_categories[f"{categories_nums}_classification"]==int(category)]["ticker"].unique()
                             model_data = data[(data["ticker"].isin(category_tickers))]
                             model_data.sort_values("date",ascending=True,inplace=True)
                             model_data.reset_index(inplace=True)
+                            model_data.dropna(inplace=True)
                             first_index = model_data[(model_data["year"] == (year - model_training_year - 1)) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
                             last_index = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
                             training_data = model_data.iloc[first_index:last_index].reset_index()
                             prediction_data = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].reset_index()
-                            # print(year,quarter,category,len(category_tickers),training_data.index.size,prediction_data.index.size)
                             X = training_data[[str(x) for x in range(number_of_training_weeks)]]
                             y = training_data["y"]
                             models = m.regression({"X":X,"y":y})
@@ -138,6 +140,7 @@ class Speculation(AnAIStrategy):
                             sim = p.column_date_processing(sim)
                             sim["year"] = [x.year for x in sim["date"]]
                             sim["week"] = [x.week for x in sim["date"]]
+                            phase = "sim complete"
                             sim = prices[["date","year","week","ticker","adjclose"]].merge(sim.drop(["date","adjclose"],axis=1),on=["year","week","ticker"],how="right").dropna()
                             sim["categories"] = categories_nums
                             final_cols = ["date","ticker","adjclose","categories"]
