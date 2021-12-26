@@ -54,13 +54,14 @@ class EquityPortfolio(APortfolio):
         for strat in tqdm(self.strats.keys()):
             try:
                 self.db.connect()
-                query = {**self.strats[strat]["params"]}
+                query = {**self.strats[strat]["class"].trading_params}
                 query["strategy"] = strat
                 t = self.db.retrieve_trades(query)
                 self.db.disconnect()
                 if t.index.size < 1:
                     strat_class = self.strats[strat]["class"]
-                    t = Backtester.equity_timeseries_backtest(self.start,self.end,self.seats,strat_class)
+                    b = Backtester(strat_class)
+                    t = b.equity_timeseries_backtest(self.start,self.end,self.seats)
                     t["strategy"] = strat
                     t["delta"] = (t["sell_price"] - t["adjclose"]) / t["adjclose"]
                     self.db.connect()

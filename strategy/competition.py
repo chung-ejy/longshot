@@ -124,44 +124,48 @@ class Competition(AnAIStrategy):
                             model_data.reset_index(inplace=True,drop=True)
                             first_index = model_data[(model_data["year"] == (year - model_training_year - 1)) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
                             last_index = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
-                            training_data = model_data.iloc[first_index:last_index].dropna().reset_index(drop=True)
-                            prediction_data = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].dropna().reset_index()
+                            training_data = model_data.iloc[first_index:last_index].reset_index(drop=True)
+                            prediction_data = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].reset_index()
                             factor_cols = [x for x in training_data.columns if x not in ["year","quarter","week","y","ticker","date"]]
-                            factors = [x for x in factor_cols if True not in training_data[col].isna()]
-                            X = training_data[factors]
-                            y = training_data["y"]
-                            models = m.regression({"X":X,"y":y})
-                            models["year"] = year
-                            models["quarter"] = quarter
-                            sim = prediction_data
-                            for i in range(models.index.size):
-                                model = models.iloc[i]
-                                api = model["api"]
-                                score = model["score"]
-                                if score >= self.modeling_params["score_requirement"]/100:
-                                    sim[f"{api}_prediction"] = model["model"].predict(sim[factors])
-                                    sim[f"{api}_score"] = model["score"].item()
-                            ticker_data = market.retrieve_ticker_prices("prices",ticker)
-                            prices = p.column_date_processing(ticker_data)
-                            prices["year"] = [x.year for x in prices["date"]]
-                            prices["week"] = [x.week for x in prices["date"]]
-                            sim = p.column_date_processing(sim)
-                            sim["year"] = [x.year for x in sim["date"]]
-                            sim["week"] = [x.week for x in sim["date"]]
-                            sim = prices[["date","year","week","ticker","adjclose"]].merge(sim.drop("date",axis=1),on=["year","week","ticker"],how="right").dropna()
-                            sim["categories"] = categories_nums
-                            final_cols = ["date","ticker","adjclose","categories"]
-                            final_cols.extend([x for x in list(sim.columns) if "prediction" in x or "score" in x])
-                            sim = sim[final_cols]
-                            sim.fillna(0,inplace=True)
-                            sim["prediction"] = [np.nanmean([row[1][x] for x in sim.columns if "prediction" in x and row[1][x] != 0]) for row in sim.iterrows()]
-                            sim["score"] = [np.nanmean([row[1][x] for x in sim.columns if "score" in x and row[1][x] != 0]) for row in sim.iterrows()]
-                            sim["delta"] = (sim["prediction"] - sim["adjclose"]) / sim["adjclose"]
-                            for param in self.modeling_params:
-                                sim[param]=self.modeling_params[param]
-                            if sim.index.size > 1:
-                                self.db.store("sim",sim)
-                                sims.append(sim)
+                            factors= []
+                            for factor in factor_cols:
+                                if len([x for x in training_data[factor].isna() if x]) / training_data.index.size > 0.8:
+                                    factors.append(factor)
+                            if len(factors) > 0:
+                                X = training_data[factors].fillna(method="ffill").fillna(method="bfill")
+                                y = training_data["y"].fillna(method="ffill").fillna(method="bfill")
+                                models = m.regression({"X":X,"y":y})
+                                models["year"] = year
+                                models["quarter"] = quarter
+                                sim = prediction_data.fillna(method="ffill").fillna(method="bfill")
+                                for i in range(models.index.size):
+                                    model = models.iloc[i]
+                                    api = model["api"]
+                                    score = model["score"]
+                                    if score >= self.modeling_params["score_requirement"]/100:
+                                        sim[f"{api}_prediction"] = model["model"].predict(sim[factors])
+                                        sim[f"{api}_score"] = model["score"].item()
+                                ticker_data = market.retrieve_ticker_prices("prices",ticker)
+                                prices = p.column_date_processing(ticker_data)
+                                prices["year"] = [x.year for x in prices["date"]]
+                                prices["week"] = [x.week for x in prices["date"]]
+                                sim = p.column_date_processing(sim)
+                                sim["year"] = [x.year for x in sim["date"]]
+                                sim["week"] = [x.week for x in sim["date"]]
+                                sim = prices[["date","year","week","ticker","adjclose"]].merge(sim.drop("date",axis=1),on=["year","week","ticker"],how="right").dropna()
+                                sim["categories"] = categories_nums
+                                final_cols = ["date","ticker","adjclose","categories"]
+                                final_cols.extend([x for x in list(sim.columns) if "prediction" in x or "score" in x])
+                                sim = sim[final_cols]
+                                sim.fillna(0,inplace=True)
+                                sim["prediction"] = [np.nanmean([row[1][x] for x in sim.columns if "prediction" in x and row[1][x] != 0]) for row in sim.iterrows()]
+                                sim["score"] = [np.nanmean([row[1][x] for x in sim.columns if "score" in x and row[1][x] != 0]) for row in sim.iterrows()]
+                                sim["delta"] = (sim["prediction"] - sim["adjclose"]) / sim["adjclose"]
+                                for param in self.modeling_params:
+                                    sim[param]=self.modeling_params[param]
+                                if sim.index.size > 1:
+                                    self.db.store("sim",sim)
+                                    sims.append(sim)
                         except Exception as e:
                             print(ticker,str(e))
             self.db.disconnect()
