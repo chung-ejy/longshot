@@ -3,7 +3,7 @@ import pandas as pd
 class Market(ADatabase):
     
     def __init__(self):
-        super().__init__("project_market")
+        super().__init__("market")
 
     def retrieve_tickers(self,currency):
         try:
