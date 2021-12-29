@@ -87,8 +87,8 @@ class FinancialPredict(AnAIStrategy):
             sp5 = market.retrieve("sp500")
             categories = product_db.retrieve("sim")
             product_db.disconnect()
-            for i in range(40):
-                financials.drop(str(i),inplace=True,axis=1,errors="ignore")
+            financials["year"] = [x.year for x in financials["date"]]
+            financials["quarter"] = [x.quarter for x in financials["date"]]
             financials["year"] = [row[1]["year"] + 1 if row[1]["quarter"] == 4 else row[1]["year"] for row in financials.iterrows()]
             financials["quarter"] = [1 if row[1]["quarter"] == 4 else row[1]["quarter"] + 1 for row in financials.iterrows()]
             financials = financials.groupby(["year","quarter","ticker"]).mean().reset_index()
