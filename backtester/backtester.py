@@ -44,6 +44,8 @@ class Backtester(object):
                                 if trade["sell_date"] < trade["date"]:
                                     date = date + timedelta(days=1)
                                 else:
+                                    for param in params:
+                                        trade[param] = params
                                     trades.append(trade)
                                     blacklist.append(trade)
                                     date = trade["sell_date"] + timedelta(days=1)

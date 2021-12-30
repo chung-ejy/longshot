@@ -10,3 +10,9 @@ class AnAIStrategy(AStrategy):
     def __init__(self,name,start_date,end_date,subscriptions,modeling_params,trading_params):
         super().__init__(name,start_date,end_date,subscriptions,modeling_params,trading_params)
         self.ai = True
+    
+    def ismodeled(self):
+        self.db.connect()
+        models = self.db.query("models",self.modeling_params)
+        self.db.disconnect()
+        return models.index.size > 0
