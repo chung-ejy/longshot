@@ -12,7 +12,10 @@ class AnAIStrategy(AStrategy):
         self.ai = True
     
     def ismodeled(self):
+        params = self.modeling_params
+        params["year"] = datetime.now().year
+        params["month"] = (datetime.now().month - 1) // 3 + 1
         self.db.connect()
-        models = self.db.query("models",self.modeling_params)
+        models = self.db.query("models",params)
         self.db.disconnect()
         return models.index.size > 0
