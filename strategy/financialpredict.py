@@ -203,10 +203,10 @@ class FinancialPredict(AnAIStrategy):
                     prices["week"] = [x.week for x in prices["date"]]
                     quarterly = prices.groupby(["year","quarter"]).mean().reset_index()
                     quarterly["y"] = quarterly["adjclose"].shift(-1)
-                    quarterly.dropna(inplace=True)
+                    quarterly.fillna(0,inplace=True)
                     quarterly["ticker"] = ticker
                     quarterly["date"] = [datetime(row[1]["year"], row[1]["quarter"] * 3 -  2, 1) for row in quarterly.iterrows()]
-                    quarterly = quarterly[quarterly["yearly"] >= year - self.modeling_params["model_training_year"]-1]
+                    quarterly = quarterly[quarterly["year"] >= year - self.modeling_params["model_training_year"]-1]
                     self.db.store("rec_transformed",quarterly)          
                     quarterly_sets.append(quarterly)
                 except Exception as e:
@@ -221,7 +221,7 @@ class FinancialPredict(AnAIStrategy):
     def model(self):
         params = self.modeling_params
         params["year"] = datetime.now().year
-        params["month"] = (datetime.now().month - 1) // 3 + 1
+        params["quarter"] = (datetime.now().month - 1) // 3 + 1
         if self.ismodeled():
             self.db.connect()
             models = self.db.query("models",params)
@@ -248,7 +248,7 @@ class FinancialPredict(AnAIStrategy):
             financial_factors = [x for x in financials.columns if x not in ["year","quarter","ticker","date"]]
             yearly_gap = 1
             self.db.connect()
-            initial_data = self.db.retrieve("rec_transformed")
+            initial_data = self.rec_transform()
             labels = initial_data.merge(categories,on=["year","quarter","ticker"],how="left")
             factors = financials.merge(categories,on=["year","quarter","ticker"],how="left")
             factors["date"] = [datetime(row[1]["year"], row[1]["quarter"] * 3 -  2, 1) for row in factors.iterrows()]
@@ -257,9 +257,9 @@ class FinancialPredict(AnAIStrategy):
             year = datetime.now().year
             quarter = (datetime.now().month - 1) // 3 + 1
             quarterly_categories = labels[(labels["year"]==year) & (labels["quarter"]==quarter)]
-            for category in list(labels[f"{categories_nums}_classification"].unique()):
+            for category in tqdm(list(quarterly_categories[f"{categories_nums}_classification"].unique())):
                 try:
-                    category_tickers = labels[labels[f"{categories_nums}_classification"]==category]["ticker"].unique()
+                    category_tickers = quarterly_categories[quarterly_categories[f"{categories_nums}_classification"]==category]["ticker"].unique()
                     training_factors = factors[factors["ticker"].isin(list(category_tickers))]
                     training_factors.sort_values("date",inplace=True)
                     if quarter == 1:
@@ -276,7 +276,6 @@ class FinancialPredict(AnAIStrategy):
                     last_index = training_labels[(training_labels["year"] == new_year) & (training_labels["quarter"]==new_quarter)].index.values.tolist()[0]
                     training_labels = training_labels.iloc[:last_index]
                     relevant_labels = training_labels[(training_labels["year"] < year) & (training_labels["year"]>=year-model_training_year)]
-                    prediction_data = training_factors[(training_factors["year"]==year) & (training_factors["quarter"]==quarter)]
                     relevant = relevant_factors.merge(relevant_labels,on=["year","quarter","ticker"],how="left").dropna()
                     relevant.reset_index(inplace=True)
                     X = relevant[financial_factors]
@@ -285,20 +284,28 @@ class FinancialPredict(AnAIStrategy):
                     models["year"] = year
                     models["quarter"] = quarter
                     models["category"] = category
-                    models["factors"] = financial_factors
+                    models["factors"] = [financial_factors for i in range(models.index.size)]
                     models["model"] = [pickle.dumps(x) for x in models["model"]]
                     for param in self.modeling_params:
                         models[param] = self.modeling_params[param]
                     self.db.connect()
                     self.db.store("models",models)
                     self.db.disconnect()
-                    sim.append(models)
-            return pd.concat(sim)
+                    sims.append(models)
+                except Exception as  e:
+                    print(year,quarter,category,str(e))     
+            return pd.concat(sims)
         
-        def recommend(self):
-            params = self.modeling_params
-            params["year"] = datetime.now().year
-            params["month"] = (datetime.now().month - 1) // 3 + 1
+    def recommend(self):
+        params = self.modeling_params
+        params["year"] = datetime.now().year
+        params["quarter"] = (datetime.now().month - 1) // 3 + 1
+        self.db.connect()
+        recs = self.db.query("recs",params)
+        self.db.disconnect()
+        if recs.index.size > 0:
+            return recs
+        else:
             if self.ismodeled():
                 self.db.connect()
                 models = self.db.query("models",params)
@@ -340,50 +347,32 @@ class FinancialPredict(AnAIStrategy):
                     sim = prediction_data
                     sim = sim.groupby(["year","quarter","ticker"]).mean().reset_index()
                     category_models = models[models["category"]==category]
-                    for i in range(models.index.size):
-                        model = models.iloc[i]
+                    for i in range(category_models.index.size):
+                        model = category_models.iloc[i]
                         api = model["api"]
                         score = model["score"]
+                        financial_factors = model["factors"]
                         if score >= self.modeling_params["score_requirement"]/100:
                             sim[f"{api}_prediction"] = model["model"].predict(sim[financial_factors])
                             sim[f"{api}_score"] = model["score"].item()
-                    stuff = []
-                    for ticker in category_tickers:
-                        ticker_data = market.retrieve_ticker_prices("prices",ticker)
-                        stuff.append(ticker_data)
-                    prices = p.column_date_processing(pd.concat(stuff))
-                    prices["year"] = [x.year for x in prices["date"]]
-                    prices["quarter"] = [x.quarter for x in prices["date"]]
-                    sim = prices.merge(sim,on=["year","quarter","ticker"],how="left").dropna()
                     sim["categories"] = categories_nums
-                    final_cols = ["date","ticker","adjclose","categories"]
+                    final_cols = ["ticker","categories"]
                     final_cols.extend([x for x in list(sim.columns) if "prediction" in x or "score" in x])
                     sim = sim[final_cols]
                     sim.fillna(0,inplace=True)
                     sim["prediction"] = [np.nanmean([row[1][x] for x in sim.columns if "prediction" in x and row[1][x] != 0]) for row in sim.iterrows()]
                     sim["score"] = [np.nanmean([row[1][x] for x in sim.columns if "score" in x and row[1][x] != 0]) for row in sim.iterrows()]
-                    sim["delta"] = (sim["prediction"] - sim["adjclose"]) / sim["adjclose"]
                     for param in params:
                         sim[param]=params[param]
                     if sim.index.size > 1:
                         self.db.store("recs",sim)
                         sims.append(sim)
-            except Exception as e:
-                print(year,quarter,category,str(e)) 
-                continue
+                except Exception as e:
+                    print(year,quarter,category,str(e)) 
+                    continue
             self.db.disconnect()
-            market.disconnect()
-            return pd.concat(sims)
-
-    def create_rec(self):
-        if self.ismodeled():
-            recs = self.recommend()
-        else:
-            self.rec_transform()
-            self.model()
-            recs = self.recommend()
-        return recs
-
+            market.disconnect()        
+        return pd.concat(sims)
             
         ## check if modeled
         ## transform for training_data for model

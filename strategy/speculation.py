@@ -7,6 +7,8 @@ pd.options.mode.chained_assignment = None
 from modeler.modeler import Modeler as m
 from processor.processor import Processor as p
 import numpy as np
+import pickle
+
 class Speculation(AnAIStrategy):
     def __init__(self,start_date,end_date,modeling_params={
                     "number_of_training_weeks":14
@@ -76,6 +78,47 @@ class Speculation(AnAIStrategy):
             data = pd.concat(weekly_sets)
             self.transformed = True
         return data
+    
+    def rec_transform(self):
+        year = datetime.now().year
+        self.db.connect()
+        data = self.db.query("rec_transformed",{"number_of_training_weeks":self.modeling_params["number_of_training_weeks"],
+                                                "year":{"$gte":year - self.modeling_params["model_training_year"] - 1}})
+        market = self.subscriptions["market"]["db"]
+        if data.index.size > 1:
+            return data
+        else:
+            market.connect()
+            sp5 = market.retrieve("sp500")
+            weekly_gap = 1
+            number_of_training_weeks = self.modeling_params["number_of_training_weeks"]
+            weekly_sets = []
+            for ticker in tqdm(sp5["Symbol"].unique(),desc="speculation_transformations"):
+                try:
+                    ticker_data = market.retrieve_ticker_prices("prices",ticker)
+                    ticker_data = p.column_date_processing(ticker_data)
+                    ticker_data["quarter"] = [x.quarter for x in ticker_data["date"]]
+                    ticker_data["year"] = [x.year for x in ticker_data["date"]]
+                    ticker_data["week"] = [x.week for x in ticker_data["date"]]
+                    weekly = ticker_data.groupby(["year","quarter","week"]).mean().reset_index()
+                    for i in range(number_of_training_weeks):
+                        weekly[i] = weekly["adjclose"].shift(i)
+                    weekly["y"] = weekly["adjclose"].shift(-weekly_gap)
+                    weekly.fillna(0,inplace=True)
+                    weekly["ticker"] = ticker
+                    for i in range(number_of_training_weeks):
+                        weekly.rename(columns={i:str(i)},inplace=True)
+                    weekly["date"] = [datetime.strptime(f'{row[1]["year"]} {row[1]["week"]} 0', "%Y %W %w") for row in weekly.iterrows()]
+                    weekly["number_of_training_weeks"] = number_of_training_weeks
+                    self.db.store("rec_transformed",weekly)
+                    weekly_sets.append(weekly)
+                except Exception as e:
+                    print(ticker,str(e))
+            self.db.disconnect()
+            market.disconnect()
+            data = pd.concat(weekly_sets)
+            self.transformed = True
+        return data
 
     def create_sim(self):
         self.db.connect()
@@ -107,7 +150,9 @@ class Speculation(AnAIStrategy):
                     for category in list(quarterly_categories[f"{categories_nums}_classification"].unique()):
                         try:
                             phase = "start"
-                            category_tickers = quarterly_categories[quarterly_categories[f"{categories_nums}_classification"]==int(category)]["ticker"].unique()
+                            if categories_nums == 4:
+                                category = int(category)
+                            category_tickers = quarterly_categories[quarterly_categories[f"{categories_nums}_classification"]==category]["ticker"].unique()
                             model_data = data[(data["ticker"].isin(category_tickers))]
                             model_data.sort_values("date",ascending=True,inplace=True)
                             model_data.reset_index(inplace=True)
@@ -157,6 +202,148 @@ class Speculation(AnAIStrategy):
                                 sims.append(sim)
                         except Exception as e:
                             print(category,str(e))
+            self.db.disconnect()
+            market.disconnect()
+            self.simmed = True
+        return pd.concat(sims)
+    
+    def model(self):
+        params = self.modeling_params
+        params["year"] = datetime.now().year
+        params["quarter"] = (datetime.now().month - 1) // 3 + 1
+        if self.ismodeled():
+            self.db.connect()
+            models = self.db.query("models",params)
+            self.db.disconnect()
+            return models
+        else:
+            year = datetime.now().year
+            quarter = (datetime.now().month - 1) // 3 + 1
+            self.db.connect()
+            data = self.db.query("rec_transformed",{"number_of_training_weeks" :self.modeling_params["number_of_training_weeks"]
+                                                     ,"year":{"$gte":params["year"] - self.modeling_params["model_training_year"] - 1}   
+                                                        })
+            self.db.disconnect()
+            stock_category = self.subscriptions["stock_category"]["db"]
+            stock_category.connect()
+            categories = stock_category.retrieve("sim")
+            stock_category.disconnect()
+            number_of_training_weeks = self.modeling_params["number_of_training_weeks"]
+            model_training_year = self.modeling_params["model_training_year"]
+            categories_nums = self.modeling_params["categories"]
+            sims = []
+            market = self.subscriptions["market"]["db"]
+            market.connect()
+            self.db.connect()
+            quarterly_categories = categories[(categories["year"]==year) & (categories["quarter"]==quarter)]
+            for category in tqdm(list(quarterly_categories[f"{categories_nums}_classification"].unique())):
+                try:
+                    phase = "start"
+                    if categories_nums == 4:
+                        category = int(category)
+                    category_tickers = quarterly_categories[quarterly_categories[f"{categories_nums}_classification"]==category]["ticker"].unique()
+                    model_data = data[(data["ticker"].isin(category_tickers))]
+                    model_data.sort_values("date",ascending=True,inplace=True)
+                    model_data.reset_index(inplace=True)
+                    model_data.dropna(inplace=True)
+                    first_index = model_data[(model_data["year"] == (year - model_training_year - 1)) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
+                    last_index = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
+                    training_data = model_data.iloc[first_index:last_index].reset_index()
+                    X = training_data[[str(x) for x in range(number_of_training_weeks)]]
+                    y = training_data["y"]
+                    models = m.regression({"X":X,"y":y})
+                    models["year"] = year
+                    models["quarter"] = quarter
+                    models["category"] = category
+                    models["factors"] = [[str(x) for x in range(number_of_training_weeks)] for i in range(models.index.size)]
+                    models["model"] = [pickle.dumps(x) for x in models["model"]]
+                    for param in self.modeling_params:
+                        models[param] = self.modeling_params[param]
+                    if models.index.size > 1:
+                        self.db.store("models",models)
+                        sims.append(models)
+                except Exception as e:
+                    print(category,str(e))
+            self.db.disconnect()
+            market.disconnect()
+            self.simmed = True
+        return pd.concat(sims)
+    
+    def recommend(self):
+        params = self.modeling_params
+        params["year"] = datetime.now().year
+        params["quarter"] = (datetime.now().month - 1) // 3 + 1
+        self.db.connect()
+        recs = self.db.query("recs",params)
+        self.db.disconnect()
+        if recs.index.size > 0:
+            return recs
+        else:
+            if self.ismodeled():
+                self.db.connect()
+                models = self.db.query("models",params)
+                self.db.disconnect()
+            else:
+                models = self.model()
+            models["model"] = [pickle.loads(x) for x in models["model"]]
+            self.db.connect()
+            data = self.db.query("transformed",{"number_of_training_weeks" :self.modeling_params["number_of_training_weeks"]
+                                                ,"year":{"$gte":params["year"] - self.modeling_params["model_training_year"] - 1}})
+            self.db.disconnect()
+            stock_category = self.subscriptions["stock_category"]["db"]
+            stock_category.connect()
+            categories = stock_category.retrieve("sim")
+            stock_category.disconnect()
+            number_of_training_weeks = self.modeling_params["number_of_training_weeks"]
+            model_training_year = self.modeling_params["model_training_year"]
+            categories_nums = self.modeling_params["categories"]
+            sims = []
+            market = self.subscriptions["market"]["db"]
+            market.connect()
+            self.db.connect()
+            year = params["year"]
+            quarter = params["quarter"]
+            quarterly_categories = categories[(categories["year"]==year) & (categories["quarter"]==quarter)]
+            for category in list(quarterly_categories[f"{categories_nums}_classification"].unique()):
+                try:
+                    phase = "start"
+                    if categories_nums == 4:
+                        category = int(category)
+                    category_tickers = quarterly_categories[quarterly_categories[f"{categories_nums}_classification"]==category]["ticker"].unique()
+                    model_data = data[(data["ticker"].isin(category_tickers))]
+                    model_data.sort_values("date",ascending=True,inplace=True)
+                    model_data.reset_index(inplace=True)
+                    model_data.dropna(inplace=True)
+                    first_index = model_data[(model_data["year"] == (year - model_training_year - 1)) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
+                    last_index = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].index.values.tolist()[0]
+                    prediction_data = model_data[(model_data["year"] == year) & (model_data["quarter"]==quarter)].reset_index()
+                    category_models = models[models["category"]==category]
+                    sim = prediction_data
+                    for i in range(category_models.index.size):
+                        model = category_models.iloc[i]
+                        api = model["api"]
+                        score = model["score"]
+                        if score >= self.modeling_params["score_requirement"]/100:
+                            sim[f"{api}_prediction"] = model["model"].predict(sim[[str(x) for x in range(number_of_training_weeks)]])
+                            sim[f"{api}_score"] = model["score"].item()
+                    sim = p.column_date_processing(sim)
+                    sim["year"] = [x.year for x in sim["date"]]
+                    sim["week"] = [x.week for x in sim["date"]]
+                    phase = "sim complete"
+                    sim["categories"] = categories_nums
+                    final_cols = ["date","year","week","ticker","categories"]
+                    final_cols.extend([x for x in list(sim.columns) if "prediction" in x or "score" in x])
+                    sim = sim[final_cols]
+                    sim.fillna(0,inplace=True)
+                    sim["prediction"] = [np.nanmean([row[1][x] for x in sim.columns if "prediction" in x and row[1][x] != 0]) for row in sim.iterrows()]
+                    sim["score"] = [np.nanmean([row[1][x] for x in sim.columns if "score" in x and row[1][x] != 0]) for row in sim.iterrows()]
+                    for param in self.modeling_params:
+                        sim[param]=self.modeling_params[param]
+                    if sim.index.size > 1:
+                        self.db.store("recs",sim)
+                        sims.append(sim)
+                except Exception as e:
+                    print(category,str(e))
             self.db.disconnect()
             market.disconnect()
             self.simmed = True
