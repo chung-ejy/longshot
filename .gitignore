@@ -10,3 +10,4 @@ stratbooks/
 productbooks/
 qa/
 visual/
+*.json
