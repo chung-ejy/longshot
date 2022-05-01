@@ -28,17 +28,17 @@ class Modeler(object):
         results.append(sk_result)
         xgb_result = self.xgb_classify(data,multioutput)
         results.append(xgb_result)
-        results.append(self.light_classify(data))
-        results.append(self.cat_classify(data))
+        # results.append(self.light_classify(data,multioutput))
+        results.append(self.cat_classify(data,multioutput))
         df = pd.DataFrame(results)
         df["model_type"] = "classification"
-        return df.sort_values("score",ascending=False)
+        return df
 
     @classmethod
     def regression(self,data):
         results = []
         sk_result = self.sk_regression(data)
-        results.extend(sk_result)
+        results.append(sk_result)
         xgb_result = self.xgb_regression(data)
         results.append(xgb_result)
         # results.append(self.light_regression(data))
@@ -104,10 +104,10 @@ class Modeler(object):
     @classmethod
     def sk_regression(self,data):
         stuff = {
-            # "sgd" : {"model":SGDRegressor(fit_intercept=True),"params":{"loss":["squared_loss","huber"]
-            #                                                 ,"learning_rate":["constant","optimal","adaptive"]
-            #                                                 ,"alpha" : [0.0001,0.001, 0.01, 0.1, 0.2, 0.5, 1]}},
-            # "r" : {"model":RidgeCV(alphas=[0.0001,0.001, 0.01, 0.1, 0.2, 0.5, 1],fit_intercept=True),"params":{}},
+            "sgd" : {"model":SGDRegressor(fit_intercept=True),"params":{"loss":["squared_loss","huber"]
+                                                            ,"learning_rate":["constant","optimal","adaptive"]
+                                                            ,"alpha" : [0.0001,0.001, 0.01, 0.1, 0.2, 0.5, 1]}},
+            "r" : {"model":RidgeCV(alphas=[0.0001,0.001, 0.01, 0.1, 0.2, 0.5, 1],fit_intercept=True),"params":{}},
             "lr" : {"model":LinearRegression(fit_intercept=True),"params":{"fit_intercept":[True,False]}}
         }
         X_train, X_test, y_train, y_test = self.shuffle_split(data)
@@ -123,7 +123,7 @@ class Modeler(object):
             except Exception as e:
                 print(str(e))
                 results.append({"api":"skl","model":str(e),"score":-99999})
-        return results
+        return pd.DataFrame(results).sort_values("score",ascending=False).iloc[0].to_dict()
 
     @classmethod
     def cat_classify(self,data,multioutput):
@@ -252,7 +252,7 @@ class Modeler(object):
                 results.append(result)
             except Exception as e:
                 results.append({"api":"skl","model":str(e),"score":-99999})
-        return pd.DataFrame(results).sort_values("score",ascending=False).iloc[0]
+        return pd.DataFrame(results).sort_values("score",ascending=False).iloc[0].to_dict()
     
     @classmethod
     def shuffle_split(self,data):

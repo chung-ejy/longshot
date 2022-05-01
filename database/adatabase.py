@@ -2,6 +2,13 @@ from pymongo import MongoClient, DESCENDING
 import pandas as pd
 from database.idatabase import IDatabase
 import asyncio
+import os
+from dotenv import load_dotenv
+load_dotenv()
+token = os.getenv("MONGO")
+import certifi
+ca = certifi.where()
+
 class ADatabase(IDatabase):
     
     def __init__(self,name):
@@ -10,6 +17,9 @@ class ADatabase(IDatabase):
     
     def connect(self):
         self.client = MongoClient("localhost",27017)
+    
+    def cloud_connect(self):
+        self.client = MongoClient(f"mongodb+srv://chungejy:{token}@scene.zblsh.mongodb.net/myFirstDatabase?retryWrites=true&w=majority",tlsCAFile=ca)
     
     def disconnect(self):
         self.client.close()

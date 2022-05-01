@@ -1,6 +1,6 @@
 from pymongo import MongoClient, DESCENDING
 import pandas as pd
-from strategy.istrategy import IStrategy
+from strategy.IStrategy import IStrategy
 from database.strategy import Strategy
 from database.dbfact import DBFact
 from tqdm import tqdm

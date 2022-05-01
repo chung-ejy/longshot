@@ -373,11 +373,3 @@ class FinancialPredict(AnAIStrategy):
             self.db.disconnect()
             market.disconnect()        
         return pd.concat(sims)
-            
-        ## check if modeled
-        ## transform for training_data for model
-        ## store model
-        ## store factors used in model
-        ## transform for prediction data for model
-        ## predict using model
-        ## save recommendation
