@@ -11,3 +11,5 @@ productbooks/
 qa/
 visual/
 *.json
+*./csv_files/*
+*.pdf
